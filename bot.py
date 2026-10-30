@@ -13,7 +13,7 @@ from config import (
     WATCHLIST,
     TRADING_MODE,
 )
-from screener import scan_watchlist
+from screener import scan_watchlist, show_momentum_portfolio
 from backtester import run_portfolio_backtest
 
 
@@ -137,6 +137,17 @@ def main():
         elif cmd == "scan":
             scan_watchlist()
             return
+        elif cmd == "momentum":
+            show_momentum_portfolio()
+            return
+        elif cmd == "setups":
+            from backtester import run_setup_comparison
+            run_setup_comparison()
+            return
+        elif cmd == "orb":
+            from orb_backtest import run_orb_test
+            run_orb_test()
+            return
         elif cmd == "backtest":
             run_portfolio_backtest()
             return
@@ -151,13 +162,14 @@ def main():
     print("Select an action:")
     print("  1. Launch Live Web Dashboard (http://127.0.0.1:8001)")
     print("  2. Scan Watchlist (Find active setups & risk sizes on NSE)")
-    print("  3. Run Historical Backtest (Test strategy over past 1 year)")
+    print("  3. Run Historical Backtest (10-year strategy comparison)")
     print("  4. Run Paper Trading Simulation Demo")
     print("  5. Position Size Calculator (Exact shares to buy)")
     print("  6. Generate Morning 2FA TOTP for Indian Broker")
-    print("  7. Exit")
+    print("  7. Momentum Rotation Portfolio (monthly top picks)")
+    print("  8. Exit")
 
-    choice = input("\nEnter choice [1-7]: ").strip()
+    choice = input("\nEnter choice [1-8]: ").strip()
     if choice == "1":
         import webbrowser
         print("Opening live trading dashboard in browser...")
@@ -173,6 +185,8 @@ def main():
     elif choice == "6":
         run_totp_generator()
     elif choice == "7":
+        show_momentum_portfolio()
+    elif choice == "8":
         print("Goodbye.")
     else:
         print("Invalid choice.")

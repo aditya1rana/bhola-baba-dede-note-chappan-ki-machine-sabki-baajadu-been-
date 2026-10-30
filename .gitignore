@@ -23,3 +23,6 @@ venv/
 # OS
 Thumbs.db
 .DS_Store
+
+# Trading skills runtime state (plans, orders, risk verdicts, your limits)
+trader/

@@ -23,8 +23,17 @@ python bot.py
 # Directly scan the market for active setups & risk sizing
 python bot.py scan
 
-# Test strategy over past 1 year of historical NSE data
+# 10-year realistic comparison of all strategies (tuned on 2017-2021, validated on 2022+)
 python bot.py backtest
+
+# Compare every swing setup (TEMA ribbon/slope, pin bar, slow EMA, continuation) on both periods
+python bot.py setups
+
+# Opening-range breakout test on NSE 5-minute bars (last 60 days)
+python bot.py orb
+
+# This month's Momentum Rotation portfolio (top 8 by 12-1 month return, cash when NIFTY < 200-day avg)
+python bot.py momentum
 
 # Run a simulated paper trading session
 python bot.py paper

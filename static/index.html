@@ -43,12 +43,20 @@
     @keyframes pulse-red { 0% { background-color: rgba(239, 68, 68, 0.4); } 100% { background-color: transparent; } }
     .flash-up { animation: pulse-green 1s ease-out; }
     .flash-down { animation: pulse-red 1s ease-out; }
+    /* Let grid columns and their cards shrink to their track instead of spilling out */
+    main > section, main > section > * { min-width: 0; }
+    main, #metrics-ribbon > * { overflow-wrap: anywhere; }
+    /* Two-column label/value rows wrap cleanly when a column gets narrow */
+    .kv-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 0.5rem; row-gap: 0.25rem; }
+    .kv-row > :last-child { margin-left: auto; text-align: right; }
+    /* Banner text flows as one paragraph; its live dot sits inline */
+    #chart-market-banner-text > span:first-child { display: inline-block; margin-right: 0.375rem; vertical-align: middle; }
   </style>
 </head>
 <body class="text-slate-200 min-h-screen flex flex-col">
 
   <!-- TOP HEADER -->
-  <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50">
+  <header class="bg-gray-900 border-b border-gray-800 px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50">
     <div class="flex items-center gap-3">
       <div class="h-9 w-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-500/30">
         <i class="fa-solid fa-chart-line"></i>
@@ -70,7 +78,7 @@
     </div>
 
     <!-- Center Control Actions -->
-    <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center gap-3">
       <!-- Auto-Pilot Target Indicator -->
       <div class="hidden xl:flex items-center gap-1.5 bg-gray-800/80 px-3 py-1.5 rounded-lg border border-gray-700 text-xs">
         <span class="text-gray-400 font-medium">Auto-Pilot Market:</span>
@@ -111,7 +119,7 @@
   </header>
 
   <!-- METRICS RIBBON -->
-  <div class="bg-gray-900/60 border-b border-gray-800 px-6 py-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+  <div id="metrics-ribbon" class="bg-gray-900/60 border-b border-gray-800 px-4 md:px-6 py-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
     <!-- Total Portfolio -->
     <div class="bg-gray-800/40 p-3 rounded-xl border border-gray-800">
       <div class="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">Total Portfolio</div>
@@ -143,24 +151,24 @@
     <!-- Daily Circuit Breaker Gauge -->
     <div class="bg-gray-800/40 p-3 rounded-xl border border-gray-800 col-span-2">
       <div class="flex justify-between text-[11px] text-gray-400 font-semibold mb-1">
-        <span>RMS DAILY DRAWDOWN (<span id="rms-limit-pct">40%</span> LIMIT)</span>
-        <span id="circuit-limit-text">₹0.00 / ₹40,000.00</span>
+        <span>RMS DAILY DRAWDOWN (<span id="rms-limit-pct">2%</span> LIMIT)</span>
+        <span id="circuit-limit-text">₹0.00 / ₹2,000.00</span>
       </div>
       <div class="w-full bg-gray-700/60 rounded-full h-2.5 overflow-hidden">
         <div id="circuit-progress-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-500" style="width: 2%"></div>
       </div>
       <div class="flex justify-between text-[10px] text-gray-500 mt-1">
         <span>Safe (Normal Operation)</span>
-        <span class="text-red-400" id="circuit-kill-text">Kill-Switch at -₹40,000</span>
+        <span class="text-red-400" id="circuit-kill-text">Kill-Switch at -₹2,000</span>
       </div>
     </div>
   </div>
 
   <!-- MAIN DASHBOARD CONTENT (3-COLUMN LAYOUT) -->
-  <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+  <main class="flex-1 p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-6">
 
     <!-- LEFT COLUMN: MULTI-MARKET WATCHLIST & SCANNER (4 COLS) -->
-    <section class="lg:col-span-4 flex flex-col gap-4">
+    <section class="xl:col-span-3 flex flex-col gap-4">
       <div class="bg-gray-900 rounded-2xl border border-gray-800 p-4 shadow-xl flex-1 flex flex-col">
         
         <!-- Header & Category Filters -->
@@ -207,13 +215,13 @@
     </section>
 
     <!-- CENTER COLUMN: LIVE MOVING CHART & POSITIONS (5 COLS) -->
-    <section class="lg:col-span-5 flex flex-col gap-6">
+    <section class="md:col-span-2 xl:col-span-6 order-first xl:order-none flex flex-col gap-6">
 
       <!-- DYNAMIC MOVING CHART CARD -->
       <div class="bg-gray-900 rounded-2xl border border-gray-800 p-4 shadow-xl flex flex-col">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div class="flex items-center gap-3">
-            <span class="text-lg font-black text-white flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span class="text-lg font-black text-white flex items-center gap-2 whitespace-nowrap">
               <span id="chart-symbol">BTC</span>
               <span class="text-[10px] px-2 py-0.5 rounded font-bold" id="chart-cat-pill">CRYPTO 24/7</span>
             </span>
@@ -222,9 +230,9 @@
           </div>
 
           <!-- View Mode Tabs & Interval -->
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <!-- Timeframe selector -->
-            <div id="tv-interval-group" class="flex bg-gray-800/90 rounded-lg p-0.5 border border-gray-700 text-[11px]">
+            <div id="tv-interval-group" class="flex flex-wrap bg-gray-800/90 rounded-lg p-0.5 border border-gray-700 text-[11px]">
               <button onclick="setTvInterval('5s')" id="int-btn-5s" class="px-2 py-0.5 rounded text-gray-400 hover:text-white transition">5s</button>
               <button onclick="setTvInterval('15s')" id="int-btn-15s" class="px-2 py-0.5 rounded text-gray-400 hover:text-white transition">15s</button>
               <button onclick="setTvInterval('1m')" id="int-btn-1m" class="px-2 py-0.5 rounded font-bold bg-blue-600 text-white shadow">1m</button>
@@ -235,15 +243,15 @@
             </div>
 
             <!-- View Mode Tabs -->
-            <div class="flex bg-gray-800/90 rounded-lg p-0.5 border border-gray-700 text-xs">
-              <button id="tab-tv-live" onclick="switchChartTab('TV_LIVE')" class="px-3.5 py-1.5 rounded-md font-extrabold bg-blue-600 text-white shadow-lg shadow-blue-500/20 transition flex items-center gap-1.5">
+            <div class="flex flex-wrap bg-gray-800/90 rounded-lg p-0.5 border border-gray-700 text-xs">
+              <button id="tab-tv-live" onclick="switchChartTab('TV_LIVE')" class="px-3 py-1.5 rounded-md font-extrabold bg-blue-600 text-white shadow-lg shadow-blue-500/20 transition flex items-center gap-1.5 whitespace-nowrap">
                 <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
                 ⚡ TradingView Live
               </button>
-              <button id="tab-live-ticks" onclick="switchChartTab('WAVE')" class="px-3 py-1.5 rounded-md font-medium text-gray-400 hover:text-white transition flex items-center gap-1.5">
+              <button id="tab-live-ticks" onclick="switchChartTab('WAVE')" class="px-3 py-1.5 rounded-md font-medium text-gray-400 hover:text-white transition flex items-center gap-1.5 whitespace-nowrap">
                 <i class="fa-solid fa-wave-square"></i> Live Wave
               </button>
-              <button id="tab-tv-embed" onclick="switchChartTab('TV_EMBED')" class="px-3 py-1.5 rounded-md font-medium text-gray-400 hover:text-white transition flex items-center gap-1.5">
+              <button id="tab-tv-embed" onclick="switchChartTab('TV_EMBED')" class="px-3 py-1.5 rounded-md font-medium text-gray-400 hover:text-white transition flex items-center gap-1.5 whitespace-nowrap">
                 <i class="fa-solid fa-chart-line"></i> TradingView Pro
               </button>
             </div>
@@ -251,18 +259,18 @@
         </div>
 
         <!-- Dynamic Live Engine Status Banner -->
-        <div id="chart-market-banner" class="mb-3 px-3 py-1.5 rounded-lg text-[11px] flex items-center justify-between bg-emerald-950/40 border border-emerald-800/40 text-emerald-300">
-          <span class="flex items-center gap-1.5" id="chart-market-banner-text">
+        <div id="chart-market-banner" class="mb-3 px-3 py-1.5 rounded-lg text-[11px] flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-emerald-950/40 border border-emerald-800/40 text-emerald-300">
+          <span class="min-w-0 leading-snug" id="chart-market-banner-text">
             <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
             <strong>INSTANT TRADINGVIEW CANDLESTICKS ACTIVE:</strong> Candlestick wicks, body, and price line update on every sub-second trade tick.
           </span>
-          <span class="text-[10px] text-gray-400" id="chart-market-hint">Zero Lag • Sub-15ms WebSocket Engine</span>
+          <span class="text-[10px] text-gray-400 whitespace-nowrap" id="chart-market-hint">Zero Lag • Sub-15ms WebSocket Engine</span>
         </div>
 
         <!-- TAB 1: Instant Real-Time TradingView Candlestick Engine -->
         <div id="tv-live-container" class="h-[420px] w-full rounded-xl overflow-hidden border border-gray-800 relative bg-[#0b0f19] flex flex-col">
           <!-- Top OHLC bar for crosshair inspection -->
-          <div class="px-3 py-1.5 border-b border-gray-800/80 bg-gray-950/70 flex items-center justify-between text-[11px] font-mono">
+          <div class="px-3 py-1.5 border-b border-gray-800/80 bg-gray-950/70 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] font-mono">
             <div id="tv-live-legend" class="flex flex-wrap items-center gap-3 text-gray-300">
               <span class="font-bold text-white tracking-wide" id="legend-sym">BTC</span>
               <span>O: <span id="legend-open" class="text-emerald-400 font-semibold">--</span></span>
@@ -271,7 +279,7 @@
               <span>C: <span id="legend-close" class="text-emerald-400 font-semibold">--</span></span>
               <span>V: <span id="legend-vol" class="text-blue-400 font-semibold">--</span></span>
             </div>
-            <div class="flex items-center gap-2 text-[10px]">
+            <div class="flex items-center gap-2 text-[10px] whitespace-nowrap ml-auto">
               <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span class="text-emerald-400 font-semibold">0ms Tick Stream</span>
               <span class="text-gray-500">•</span>
@@ -281,7 +289,7 @@
           <!-- Chart canvas mount point -->
           <div id="tv-lightweight-mount" class="flex-1 w-full h-full relative"></div>
           <!-- Live Real-Time Trade Feed Tape -->
-          <div class="px-3 py-1 border-t border-gray-800/60 bg-gray-950/40 flex items-center justify-between text-[10px] text-gray-400 font-mono">
+          <div class="px-3 py-1 border-t border-gray-800/60 bg-gray-950/40 flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-gray-400 font-mono">
             <span class="flex items-center gap-1 text-emerald-400">
               <i class="fa-solid fa-bolt text-xs"></i> <span id="tv-tape-status">Candle Engine: Streaming Live Trades</span>
             </span>
@@ -375,20 +383,20 @@
     </section>
 
     <!-- RIGHT COLUMN: TRADE EXECUTION TERMINAL (3 COLS) -->
-    <section class="lg:col-span-3 flex flex-col gap-4">
+    <section class="xl:col-span-3 flex flex-col gap-4">
       <div class="bg-gray-900 rounded-2xl border border-gray-800 p-5 shadow-xl flex-1 flex flex-col justify-between">
         <div>
-          <div class="flex items-center justify-between pb-3 border-b border-gray-800 mb-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-gray-800 mb-4">
             <div class="flex items-center gap-2">
               <i class="fa-solid fa-bolt text-yellow-400 text-sm"></i>
-              <h2 class="text-sm font-bold text-white uppercase tracking-wider">Order Terminal</h2>
+              <h2 class="text-sm font-bold text-white uppercase tracking-wider whitespace-nowrap">Order Terminal</h2>
             </div>
-            <span class="text-xs font-bold px-2 py-0.5 rounded" id="order-market-badge">CRYPTO</span>
+            <span class="text-xs font-bold px-2 py-0.5 rounded whitespace-nowrap" id="order-market-badge">CRYPTO</span>
           </div>
 
           <!-- Auto-Pilot AI Status Card -->
           <div id="terminal-autopilot-card" class="mb-3.5 p-3 rounded-xl bg-purple-950/30 border border-purple-800/40 text-xs space-y-1.5">
-            <div class="flex items-center justify-between">
+            <div class="kv-row">
               <div class="flex items-center gap-1.5 font-bold text-purple-300">
                 <i class="fa-solid fa-robot text-purple-400"></i>
                 <span>AUTO-PILOT AI ENGINE</span>
@@ -397,9 +405,9 @@
                 OFF
               </span>
             </div>
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-gray-400">Target Market:</span>
-              <div class="flex items-center gap-1">
+            <div class="kv-row text-[11px]">
+              <span class="text-gray-400 whitespace-nowrap">Target Market:</span>
+              <div class="flex flex-wrap justify-end items-center gap-1">
                 <button type="button" id="btn-mkt-crypto" onclick="setAutoPilotMarket('CRYPTO')" title="Trade Crypto 24/7 (Trades any coin in Crypto)" class="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/30 text-amber-300 border border-amber-500 shadow-sm transition">
                   ⚡ Crypto 24/7
                 </button>
@@ -408,15 +416,15 @@
                 </button>
               </div>
             </div>
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-gray-400">Market Policy:</span>
+            <div class="kv-row text-[11px]">
+              <span class="text-gray-400 whitespace-nowrap">Market Policy:</span>
               <span class="font-semibold text-emerald-400 flex items-center gap-1">
                 <i class="fa-solid fa-layer-group text-cyan-400"></i> Single Market Only &bull; Trades Any Coin
               </span>
             </div>
-            <div class="flex items-center justify-between text-[11px] pt-1 border-t border-purple-800/30">
-              <span class="text-gray-400">Risk Profile:</span>
-              <div class="flex items-center gap-1">
+            <div class="kv-row text-[11px] pt-1 border-t border-purple-800/30">
+              <span class="text-gray-400 whitespace-nowrap">Risk Profile:</span>
+              <div class="flex flex-wrap justify-end items-center gap-1">
                 <button type="button" id="btn-risk-high" onclick="setAutoPilotRisk('HIGH')" title="High Risk: Deploys ~90% available cash per trade for big P&L swings" class="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-600/30 text-red-300 border border-red-500 shadow-sm transition">
                   🔥 HIGH RISK (90% Sizing)
                 </button>
@@ -425,8 +433,8 @@
                 </button>
               </div>
             </div>
-            <div class="flex items-center justify-between text-[11px]">
-              <span class="text-gray-400">Execution Mode:</span>
+            <div class="kv-row text-[11px]">
+              <span class="text-gray-400 whitespace-nowrap">Execution Mode:</span>
               <span class="font-bold text-emerald-400 flex items-center gap-1">
                 <i class="fa-solid fa-bolt text-amber-400"></i> Pure Signal (Instant & Untimed)
               </span>
@@ -573,12 +581,90 @@
             <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
             Paper Execution Engine Active
           </span>
-          <span>Friction: ₹20 / 0.05%</span>
+          <span>Fills at the live price, no simulated fees</span>
         </div>
       </div>
     </section>
 
   </main>
+
+  <!-- TRADING SKILLS: scan -> analyse -> size & risk -> your yes -> paper order -->
+  <section id="skills-panel" class="px-4 md:px-6 pb-8">
+    <div class="bg-gray-900 rounded-2xl border border-gray-800 p-4 md:p-5 shadow-xl">
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-800 mb-4">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-wand-magic-sparkles text-cyan-400"></i>
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider">Trading Skills</h2>
+          <span class="text-[11px] text-gray-400">Scan → Analyse → Size &amp; risk → your yes → paper order. Live prices, real charges.</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <div class="flex bg-gray-800/90 rounded-lg p-0.5 border border-gray-700">
+            <button id="sk-mkt-nse" onclick="skSetMarket('nse')" class="px-3 py-1 rounded-md font-bold whitespace-nowrap">🇮🇳 NSE</button>
+            <button id="sk-mkt-crypto" onclick="skSetMarket('crypto')" class="px-3 py-1 rounded-md font-bold whitespace-nowrap">⚡ Crypto</button>
+          </div>
+          <div class="flex bg-gray-800/90 rounded-lg p-0.5 border border-gray-700">
+            <button id="sk-mode-orb" onclick="skSetMode('orb')" class="px-3 py-1 rounded-md font-bold whitespace-nowrap" title="Opening-range breakouts so far today">Breakouts today</button>
+            <button id="sk-mode-daily" onclick="skSetMode('daily')" class="px-3 py-1 rounded-md font-bold whitespace-nowrap" title="Setups on daily closes">Daily setups</button>
+          </div>
+          <button id="sk-scan-btn" onclick="skScan()" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-1.5 rounded-lg whitespace-nowrap">
+            <i class="fa-solid fa-magnifying-glass"></i> Scan
+          </button>
+        </div>
+      </div>
+
+      <!-- Auto-Pilot log: what the Auto-Pilot's skills decided, newest first (read only) -->
+      <div class="rounded-xl border border-gray-800 bg-gray-950/40 p-3 mb-4">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <i class="fa-solid fa-robot text-cyan-400"></i>
+          <span class="font-bold text-white uppercase tracking-wider text-[11px]">Auto-Pilot log</span>
+          <span id="sk-auto-state" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-800 text-gray-400">OFF</span>
+          <span id="sk-auto-next" class="text-[11px] text-gray-400"></span>
+        </div>
+        <div id="sk-auto-log" class="mt-2 max-h-[180px] overflow-y-auto text-[11px] font-mono space-y-0.5"></div>
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <!-- 1. Scan results -->
+        <div class="xl:col-span-4 min-w-0">
+          <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">1. Scan</div>
+          <div id="sk-scan-status" class="text-xs text-gray-400 mb-2">Pick a market and press Scan.</div>
+          <div class="max-h-[420px] overflow-y-auto rounded-xl border border-gray-800">
+            <table class="w-full text-xs">
+              <thead class="bg-gray-800/70 text-gray-400 sticky top-0">
+                <tr><th class="text-left px-2 py-1.5">Symbol</th><th class="text-left px-2 py-1.5">Setup</th><th class="text-right px-2 py-1.5">Price</th><th class="px-2 py-1.5"></th></tr>
+              </thead>
+              <tbody id="sk-scan-rows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 2. Analysis -->
+        <div class="xl:col-span-4 min-w-0">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">2. Analyse</div>
+            <div class="flex items-center gap-1 text-[11px]">
+              <label class="text-gray-400">Stop</label>
+              <select id="sk-stop" class="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white">
+                <option value="or-mid">range mid</option><option value="or-low" selected>range low</option><option value="atr:2">2 × ATR</option><option value="atr:3">3 × ATR</option>
+              </select>
+              <label class="text-gray-400 ml-1">Target</label>
+              <select id="sk-target" class="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white">
+                <option>1R</option><option>1.5R</option><option selected>2R</option><option>3R</option>
+              </select>
+            </div>
+          </div>
+          <div id="sk-analysis" class="rounded-xl border border-gray-800 p-3 text-xs text-gray-400 min-h-[120px]">Analyse a symbol from the scan.</div>
+        </div>
+
+        <!-- 3. Size, risk, place -->
+        <div class="xl:col-span-4 min-w-0">
+          <div class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">3. Size, risk &amp; place</div>
+          <div id="sk-order" class="rounded-xl border border-gray-800 p-3 text-xs text-gray-400 min-h-[120px]">After an analysis, size the trade and run the risk check.</div>
+        </div>
+      </div>
+      <p class="text-[10px] text-gray-500 mt-3">Paper trading on live prices. Charges: NSE Zerodha intraday (brokerage, STT, exchange, SEBI, stamp, GST); crypto 0.1 % per side. Limits per market in trader/config.json. Education and tooling, not financial advice.</p>
+    </div>
+  </section>
 
   <!-- JAVASCRIPT APP LOGIC -->
   <script>
@@ -594,7 +680,7 @@
     let tickPrices = [];
     let prevPrices = {};
     let currentMarketFilter = 'ALL';
-    const USD_INR_RATE = 85.0;
+    let USD_INR_RATE = null;   // the live USD/INR rate, sent by the server with every portfolio update
 
     // Audio Chimes
     function playChime(isSuccess = true) {
@@ -1062,9 +1148,9 @@
       ].forEach(item => {
         if (!item.btn) return;
         if (item.active) {
-          item.btn.className = "px-3.5 py-1.5 rounded-md font-extrabold bg-blue-600 text-white shadow-lg shadow-blue-500/20 transition flex items-center gap-1.5";
+          item.btn.className = "px-3 py-1.5 rounded-md font-extrabold bg-blue-600 text-white shadow-lg shadow-blue-500/20 transition flex items-center gap-1.5 whitespace-nowrap";
         } else {
-          item.btn.className = "px-3 py-1.5 rounded-md font-medium text-gray-400 hover:text-white transition flex items-center gap-1.5";
+          item.btn.className = "px-3 py-1.5 rounded-md font-medium text-gray-400 hover:text-white transition flex items-center gap-1.5 whitespace-nowrap";
         }
       });
 
@@ -1356,12 +1442,12 @@
         pill.innerText = 'CRYPTO 24/7';
         pill.className = 'text-[10px] px-2 py-0.5 rounded font-bold bg-amber-950 text-amber-400 border border-amber-800';
         orderBadge.innerText = 'CRYPTO 24/7';
-        orderBadge.className = 'text-xs bg-amber-950 text-amber-400 px-2 py-0.5 rounded border border-amber-800 font-bold';
+        orderBadge.className = 'text-xs bg-amber-950 text-amber-400 px-2 py-0.5 rounded border border-amber-800 font-bold whitespace-nowrap';
         document.getElementById('order-qty').step = 'any';
         document.getElementById('order-qty').value = stock && stock.suggested_qty ? stock.suggested_qty : '0.01';
 
         if (banner) {
-          banner.className = "mb-3 px-3 py-1.5 rounded-lg text-[11px] flex items-center justify-between bg-emerald-950/40 border border-emerald-800/40 text-emerald-300";
+          banner.className = "mb-3 px-3 py-1.5 rounded-lg text-[11px] flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-emerald-950/40 border border-emerald-800/40 text-emerald-300";
           bannerText.innerHTML = '<span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping mr-1"></span> <strong>CRYPTO 24/7 LIVE:</strong> Market is trading actively right now. Prices & candles update in real-time.';
           bannerHint.innerText = 'Active non-stop';
         }
@@ -1369,12 +1455,12 @@
         pill.innerText = 'NSE';
         pill.className = 'text-[10px] px-2 py-0.5 rounded font-bold bg-blue-950 text-blue-300 border border-blue-800';
         orderBadge.innerText = 'NSE MIS';
-        orderBadge.className = 'text-xs bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800 font-bold';
+        orderBadge.className = 'text-xs bg-blue-950 text-blue-300 px-2 py-0.5 rounded border border-blue-800 font-bold whitespace-nowrap';
         document.getElementById('order-qty').step = '1';
         document.getElementById('order-qty').value = stock && stock.suggested_qty ? stock.suggested_qty : '10';
 
         if (banner) {
-          banner.className = "mb-3 px-3 py-1.5 rounded-lg text-[11px] flex items-center justify-between bg-blue-950/50 border border-blue-800/50 text-blue-200";
+          banner.className = "mb-3 px-3 py-1.5 rounded-lg text-[11px] flex flex-wrap items-center justify-between gap-x-3 gap-y-1 bg-blue-950/50 border border-blue-800/50 text-blue-200";
           bannerText.innerHTML = '<i class="fa-solid fa-clock text-blue-400 mr-1.5"></i> <strong>NSE CLOSED AT 3:30 PM:</strong> Equity market re-opens tomorrow at <strong>09:15 AM IST</strong>.';
           bannerHint.innerText = 'Switch to "Live Ticks" tab for moving wave, or select Crypto for 24/7 action';
         }
@@ -1385,14 +1471,10 @@
       // Reset Live Ticks line for selected asset
       tickLabels = [];
       tickPrices = [];
-      const basePrice = stock ? stock.ltp : 1000;
       const now = new Date();
-      for (let i = 15; i >= 0; i--) {
-        const t = new Date(now.getTime() - (i * 1500));
-        tickLabels.push(t.toTimeString().split(' ')[0]);
-        const jitter = (Math.random() - 0.5) * (basePrice * 0.0005);
-        tickPrices.push(basePrice + jitter);
-      }
+      // Only real quotes: start from the current live price, no invented history
+      tickLabels = stock ? [now.toTimeString().split(' ')[0]] : [];
+      tickPrices = stock ? [stock.ltp] : [];
       if (liveTickChart) {
         liveTickChart.data.labels = tickLabels;
         liveTickChart.data.datasets[0].data = tickPrices;
@@ -1797,6 +1879,7 @@
       // 2. Portfolio Metrics
       if (data.portfolio) {
         const p = data.portfolio;
+        if (p.usd_inr_rate) USD_INR_RATE = p.usd_inr_rate;
         document.getElementById('metric-portfolio-val').innerText = `₹${p.portfolio_value.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
         document.getElementById('metric-portfolio-usd').innerText = `$${p.portfolio_value_usd.toLocaleString('en-US', {minimumFractionDigits: 2})} USD`;
 
@@ -1955,12 +2038,15 @@
       ws.onerror = () => ws.close();
     }
 
-    // Instant Sub-Second Real-Time Stream (Ticks 2.5x per second - continuous smooth motion!)
+    // Plot each REAL quote once, when it arrives: no random jitter, no repeated points
+    let lastPlottedQuote = null;
     setInterval(() => {
       if (liveMarketData[selectedSymbol]) {
-        const ltp = liveMarketData[selectedSymbol].ltp;
-        const microJitter = (Math.random() - 0.49) * (ltp * 0.00015);
-        const tickPrice = Math.round((ltp + microJitter) * 100) / 100;
+        const q = liveMarketData[selectedSymbol];
+        const quoteKey = selectedSymbol + '|' + (q.quote_time || q.updated_at) + '|' + q.ltp;
+        if (quoteKey === lastPlottedQuote) return;
+        lastPlottedQuote = quoteKey;
+        const tickPrice = q.ltp;
         const now = new Date();
         const nowStr = now.toTimeString().split(' ')[0];
         pushLiveTick(nowStr, tickPrice);
@@ -2003,6 +2089,196 @@
       connectBinanceMultiTicker();
       setInterval(refreshOrders, 4000);
     };
+  </script>
+
+  <!-- TRADING SKILLS PANEL LOGIC -->
+  <script>
+    let skMarket = 'nse', skMode = 'orb', skBusy = false, skLastAnalysis = null;
+
+    function skEsc(v) {
+      return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    }
+    function skCur(sym) { return /\.NS$/i.test(sym || '') || skMarket === 'nse' ? '₹' : '$'; }
+    function skNum(x, sym) {
+      if (x == null || isNaN(x)) return '-';
+      const v = Number(x), dp = Math.abs(v) >= 100 ? 2 : Math.abs(v) >= 1 ? 4 : 6;
+      return skCur(sym) + v.toLocaleString('en-IN', {minimumFractionDigits: Math.min(dp, 2), maximumFractionDigits: dp});
+    }
+    function skR(x) { return x == null ? '-' : (x >= 0 ? '+' : '') + Number(x).toFixed(2) + 'R'; }
+    function skToggle(prefix, active, all) {
+      all.forEach(k => {
+        const b = document.getElementById(prefix + k);
+        if (b) b.className = 'px-3 py-1 rounded-md font-bold whitespace-nowrap ' +
+          (k === active ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white');
+      });
+    }
+    function skSetMarket(m) { skMarket = m; skToggle('sk-mkt-', m, ['nse', 'crypto']); }
+    function skSetMode(m) { skMode = m; skToggle('sk-mode-', m, ['orb', 'daily']); }
+    async function skPost(path, body) {
+      const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+      if (!r.ok) throw new Error((await r.text()) || ('HTTP ' + r.status));
+      return r.json();
+    }
+    function skBusyOn(el, text) {
+      skBusy = true;
+      el.innerHTML = `<div class="text-cyan-300"><i class="fa-solid fa-spinner fa-spin"></i> ${skEsc(text)}</div>`;
+    }
+
+    function skAutoRender(a) {
+      const st = document.getElementById('sk-auto-state');
+      st.textContent = a.enabled ? (a.busy ? 'SCANNING ' : 'ON ') + a.markets.map(m => m.toUpperCase()).join(', ') : 'OFF';
+      st.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold ' + (a.enabled ? 'bg-emerald-900/60 text-emerald-300' : 'bg-gray-800 text-gray-400');
+      const next = Object.entries(a.next_in || {}).map(([m, s]) => `${m.toUpperCase()} in ${Math.ceil(s / 60)} min`).join(', ');
+      document.getElementById('sk-auto-next').textContent = a.enabled && next && !a.busy ? 'Next scan: ' + next : '';
+      const colour = {placed: 'text-emerald-300', closed: 'text-cyan-300', blocked: 'text-amber-300', error: 'text-rose-400', scan: 'text-gray-300', on: 'text-emerald-400', off: 'text-gray-400'};
+      document.getElementById('sk-auto-log').innerHTML = a.log.length ? a.log.map(e =>
+        `<div class="${colour[e.action] || 'text-gray-500'}">${skEsc(e.at.slice(11))} ${skEsc((e.market || '').toUpperCase())} ${skEsc(e.symbol)} <b>${skEsc(e.action)}</b> ${skEsc(e.detail)}</div>`).join('')
+        : '<div class="text-gray-500">No decisions yet. Turn on Auto-Pilot to let the skills trade.</div>';
+    }
+    async function skAutoLoad() {
+      try { skAutoRender(await (await fetch('/api/skills/auto')).json()); } catch (e) {}
+    }
+    skAutoLoad();
+    setInterval(skAutoLoad, 15000);
+
+    async function skScan() {
+      if (skBusy) return;
+      const st = document.getElementById('sk-scan-status'), rows = document.getElementById('sk-scan-rows');
+      skBusyOn(st, `Scanning ${skMarket === 'nse' ? '38 NSE stocks' : '23 coins'} on live bars...`);
+      rows.innerHTML = '';
+      try {
+        const r = await skPost('/api/skills/scan', {market: skMarket, mode: skMode});
+        const d = r.data;
+        if (!d) { st.innerHTML = `<span class="text-amber-300">${skEsc(r.error || r.text || 'The scan found nothing to show.')}</span>`; return; }
+        st.innerHTML = `${skEsc(d.as_of || '')}: ${d.hits.length} of ${d.scanned} matched. ` +
+          `<span class="text-gray-500">${skEsc(d.note || '')}</span>`;
+        rows.innerHTML = d.hits.map(h => {
+          const setup = skMode === 'orb' ? `breakout ${skEsc(h.at)}, +${Number(h.pct_over).toFixed(2)}%` : skEsc((h.setups || []).join(', '));
+          return `<tr class="border-t border-gray-800 hover:bg-gray-800/40">
+            <td class="px-2 py-1.5 font-bold text-white">${skEsc(h.symbol)}</td>
+            <td class="px-2 py-1.5 text-gray-300">${setup}</td>
+            <td class="px-2 py-1.5 text-right text-gray-200">${skNum(h.price, h.symbol)}</td>
+            <td class="px-2 py-1.5 text-right"><button class="text-cyan-300 hover:text-white font-bold" onclick="skAnalyze('${skEsc(h.symbol)}')">Analyse</button></td></tr>`;
+        }).join('') || `<tr><td colspan="4" class="px-2 py-3 text-gray-500">No matches right now.</td></tr>`;
+      } catch (e) {
+        st.innerHTML = `<span class="text-red-400">Scan failed: ${skEsc(e.message)}</span>`;
+      } finally { skBusy = false; }
+    }
+
+    async function skAnalyze(sym) {
+      if (skBusy) return;
+      const box = document.getElementById('sk-analysis');
+      document.getElementById('sk-order').innerHTML = 'After an analysis, size the trade and run the risk check.';
+      skBusyOn(box, `Analysing ${sym}: entry timer, exit plan, 10,000 replays...`);
+      try {
+        const r = await skPost('/api/skills/analyze', {symbol: sym, stop: document.getElementById('sk-stop').value,
+                                                      target: document.getElementById('sk-target').value});
+        skLastAnalysis = r;
+        box.innerHTML = skRenderAnalysis(sym, r);
+      } catch (e) {
+        box.innerHTML = `<span class="text-red-400">Analysis failed: ${skEsc(e.message)}</span>`;
+      } finally { skBusy = false; }
+    }
+
+    function skRenderAnalysis(sym, r) {
+      const e = r.entry && r.entry.data;
+      let html = `<div class="font-bold text-white text-sm mb-1">${skEsc(sym)}</div>`;
+      if (!e) return html + `<div class="text-red-400">${skEsc((r.entry && (r.entry.error || r.entry.text)) || 'No answer from the entry timer.')}</div>`;
+      if (e.status !== 'triggered') return html + `<div class="text-amber-300">${skEsc(e.status.toUpperCase())}: ${skEsc(e.reason)}</div>`;
+      const t = e.trigger, late = (e.minutes_since || 0) > 5;
+      html += `<div>Breakout at <b class="text-white">${skEsc(t.time)}</b>, ${skNum(t.price, sym)} (+${Number(t.pct_over).toFixed(2)}% over the range high).</div>`;
+      if (late) html += `<div class="mt-1 p-1.5 rounded bg-amber-950/50 border border-amber-800 text-amber-300">That was ${e.minutes_since} minutes ago; the last close is ${skNum(e.last && e.last.close, sym)}. A late entry is a different trade.</div>`;
+      const p = r.plan;
+      if (!p) return html;
+      if (!p.data) return html + `<div class="mt-2 text-red-400">Plan refused: ${skEsc(p.error || p.text)}</div>`;
+      const pl = p.data, c = pl.costs || {};
+      html += `<div class="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">
+        <span class="text-gray-400">Entry</span><span class="text-right text-white">${skNum(pl.entry, sym)}</span>
+        <span class="text-gray-400">Stop</span><span class="text-right text-red-300">${skNum(pl.stop, sym)}</span>
+        <span class="text-gray-400">Target</span><span class="text-right text-emerald-300">${skNum(pl.target, sym)} (${pl.target_r}R)</span>
+        <span class="text-gray-400">Charges at stop / target</span><span class="text-right">${skNum(c.at_stop, sym)} / ${skNum(c.at_target, sym)}</span>
+        <span class="text-gray-400">After charges</span><span class="text-right">target ${skR(c.r_at_target_net)}, stop ${skR(c.r_at_stop_net)}</span>
+        <span class="text-gray-400">Flat by</span><span class="text-right">${skEsc(pl.flat_by)} ${sym.endsWith('.NS') ? 'IST' : 'UTC'}</span></div>`;
+      (pl.warnings || []).forEach(w => html += `<div class="text-amber-300 mt-1">${skEsc(w)}</div>`);
+      const tm = r.timemachine;
+      if (!tm) return html;
+      if (!tm.data) return html + `<div class="mt-2 text-red-400">Time machine: ${skEsc(tm.error || tm.text)}</div>`;
+      const m = tm.data.mc, h = tm.data.history || {};
+      const bar = (v, cls) => `<div class="h-2 rounded ${cls}" style="width:${Math.max(1, Math.round(v * 100))}%"></div>`;
+      html += `<div class="mt-3 text-[11px] text-gray-400">10,000 replays to ${skEsc(m.until)} (seed ${m.seed}):</div>
+        <div class="space-y-1 mt-1">
+          <div class="flex items-center gap-2"><span class="w-16">target</span>${bar(m.p_target, 'bg-emerald-500')}<span>${(100 * m.p_target).toFixed(1)}%</span></div>
+          <div class="flex items-center gap-2"><span class="w-16">stop</span>${bar(m.p_stop, 'bg-red-500')}<span>${(100 * m.p_stop).toFixed(1)}%</span></div>
+          <div class="flex items-center gap-2"><span class="w-16">neither</span>${bar(m.p_neither, 'bg-gray-500')}<span>${(100 * m.p_neither).toFixed(1)}%</span></div>
+        </div>
+        <div class="mt-2">Average R: ${skR(m.avg_R)} before charges, <b class="text-white">${skR(m.avg_R_net)} after</b>.</div>`;
+      if (h.triggered) html += `<div>History: ${h.triggered} real trades with this rule, ${h.target} targets, ${h.stop} stops; average <b class="text-white">${skR(h.avg_R_net)} after charges</b> (${skR(h.avg_R)} before).</div>`;
+      html += `<div class="mt-2 p-2 rounded bg-gray-800/70 border border-gray-700 text-gray-200">${skEsc(tm.data.verdict)}</div>`;
+      html += `<button onclick="skSize()" class="mt-3 w-full bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white font-bold py-1.5 rounded-lg">Size it &amp; run the risk check</button>`;
+      return html;
+    }
+
+    async function skSize() {
+      if (skBusy) return;
+      const box = document.getElementById('sk-order');
+      skBusyOn(box, 'Sizing to your max loss (charges included), then the risk check...');
+      try {
+        const r = await skPost('/api/skills/size');
+        box.innerHTML = skRenderOrder(r);
+      } catch (e) {
+        box.innerHTML = `<span class="text-red-400">Sizing failed: ${skEsc(e.message)}</span>`;
+      } finally { skBusy = false; }
+    }
+
+    function skRenderOrder(r) {
+      const s = r.size && r.size.data && r.size.data.sizing;
+      if (!s) return `<div class="text-red-400">${skEsc((r.size && (r.size.error || r.size.text)) || 'No sizing.')}</div>`;
+      const sym = s.symbol;
+      if (s.refusal) return `<div class="text-amber-300">No order: ${skEsc(s.refusal)}</div>`;
+      let html = `<div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
+        <span class="text-gray-400">Buy</span><span class="text-right text-white font-bold">${skEsc(s.qty)} ${skEsc(sym)}</span>
+        <span class="text-gray-400">Cost</span><span class="text-right">${skNum(s.cost, sym)}</span>
+        <span class="text-gray-400">Max loss at stop</span><span class="text-right text-red-300">${skNum(s.max_loss, sym)} <span class="text-gray-500">(incl. ${skNum(s.charges_at_stop, sym)} charges)</span></span>
+        <span class="text-gray-400">At target, after charges</span><span class="text-right text-emerald-300">${skNum(s.net_gain_at_target, sym)}</span>
+        <span class="text-gray-400">Sized by</span><span class="text-right">${skEsc(s.bound_by)}</span></div>`;
+      const rv = r.risk && r.risk.data && r.risk.data.results && r.risk.data.results[0];
+      if (rv) {
+        const pass = rv.verdict === 'PASS';
+        html += `<div class="mt-2 p-2 rounded border ${pass ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-red-950/40 border-red-800 text-red-300'}">
+          <b>Risk check: ${skEsc(rv.verdict)}</b>${rv.reasons.map(x => `<div>• ${skEsc(x)}</div>`).join('')}
+          ${rv.warnings.map(x => `<div class="text-amber-300">~ ${skEsc(x)}</div>`).join('')}</div>`;
+      }
+      const tk = r.ticket && r.ticket.data;
+      if (tk && tk.ready) {
+        html += `<div class="mt-3 text-gray-300">${skEsc(tk.plain)}</div>
+          <div class="mt-2 text-[11px] text-gray-400">Type <b class="text-white">yes</b> to place this one paper order at the live price. Anything else does nothing.</div>
+          <div class="flex gap-2 mt-1">
+            <input id="sk-reply" class="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white" placeholder="yes" autocomplete="off">
+            <button onclick="skPlace()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 rounded">Place</button>
+          </div>`;
+      } else if (tk) {
+        html += `<div class="mt-2 text-amber-300">${skEsc(tk.status)}</div>`;
+      }
+      return html;
+    }
+
+    async function skPlace() {
+      if (skBusy) return;
+      const reply = (document.getElementById('sk-reply') || {}).value || '';
+      const box = document.getElementById('sk-order');
+      const keep = box.innerHTML;
+      skBusyOn(box, 'Recording your answer...');
+      try {
+        const r = await skPost('/api/skills/place', {reply: reply});
+        box.innerHTML = keep + `<div class="mt-2 p-2 rounded border ${r.placed ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' : 'bg-amber-950/40 border-amber-800 text-amber-300'}">${skEsc(r.message)}</div>`;
+        if (r.placed && typeof refreshAll === 'function') refreshAll();
+      } catch (e) {
+        box.innerHTML = keep + `<div class="mt-2 text-red-400">Not placed: ${skEsc(e.message)}</div>`;
+      } finally { skBusy = false; }
+    }
+
+    skSetMarket('nse');
+    skSetMode('orb');
   </script>
 </body>
 </html>

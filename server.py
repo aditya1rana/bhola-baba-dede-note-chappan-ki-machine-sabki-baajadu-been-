@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import sys
+import subprocess
 import threading
 import time as time_module
 from typing import Dict, List, Optional
@@ -35,11 +36,40 @@ import yfinance as yf
 
 # Configuration
 INITIAL_CAPITAL = 100000.0  # ₹1,00,000 INR starting capital (~$1,176 USD)
-USD_INR_RATE = 85.0         # Approximate conversion rate for USD assets
-MAX_DAILY_LOSS_PCT = 0.40   # 40% Max daily drawdown circuit breaker
+USD_INR_RATE = None         # live USD/INR from Yahoo (INR=X), set before the engine starts, refreshed every 60s
+MAX_DAILY_LOSS_PCT = 0.02   # 2% loss halts trading and squares off (config.py's limit)
+HIGH_RISK_LOSS_PCT = 0.05   # 5% in HIGH risk mode (it was 40%, which let one session burn 40% of capital)
 RISK_PER_TRADE_PCT = 0.01   # 1% risk per trade
-BROKERAGE_PER_ORDER = 2.0   # ₹2 fair simulated brokerage per order
-SLIPPAGE_PCT = 0.0002       # 0.02% realistic liquid crypto spread
+# Strictly live prices: every fill is the live quote itself, with no simulated slippage or brokerage
+# (there is no broker, so any fee would be invented). Real trading would add real costs on top.
+BROKERAGE_PER_ORDER = 0.0
+MAX_QUOTE_AGE = {"CRYPTO": 10.0, "NSE": 120.0}   # seconds; an older quote is not a live price
+
+
+def fetch_usd_inr() -> float:
+    """The live USD/INR rate from Yahoo's INR=X quote. Raises if neither host answers."""
+    last = None
+    for host in ("query2", "query1"):
+        try:
+            url = "https://%s.finance.yahoo.com/v8/finance/chart/INR=X?range=1d&interval=1m" % host
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                rate = float(json.loads(r.read())["chart"]["result"][0]["meta"]["regularMarketPrice"])
+            if rate > 0:
+                return rate
+        except Exception as e:
+            last = e
+    raise RuntimeError("could not fetch the live USD/INR rate from Yahoo: %s" % last)
+
+
+def refresh_usd_inr():
+    global USD_INR_RATE
+    while True:
+        time_module.sleep(60.0)
+        try:
+            USD_INR_RATE = fetch_usd_inr()
+        except RuntimeError as e:
+            print(f"[FX] {e}; keeping the last live rate {USD_INR_RATE}")
 
 # Unified Multi-Market Asset Catalog
 ASSETS = {
@@ -54,6 +84,34 @@ ASSETS = {
     "ITC": {"ticker": "ITC.NS", "name": "ITC Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:ITC", "min_qty": 1, "step": 1},
     "TATAPOWER": {"ticker": "TATAPOWER.NS", "name": "Tata Power Company Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:TATAPOWER", "min_qty": 1, "step": 1},
     "WIPRO": {"ticker": "WIPRO.NS", "name": "Wipro Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:WIPRO", "min_qty": 1, "step": 1},
+    "LT": {"ticker": "LT.NS", "name": "Larsen & Toubro Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:LT", "min_qty": 1, "step": 1},
+    "AXISBANK": {"ticker": "AXISBANK.NS", "name": "Axis Bank Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:AXISBANK", "min_qty": 1, "step": 1},
+    "KOTAKBANK": {"ticker": "KOTAKBANK.NS", "name": "Kotak Mahindra Bank Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:KOTAKBANK", "min_qty": 1, "step": 1},
+    "HINDUNILVR": {"ticker": "HINDUNILVR.NS", "name": "Hindustan Unilever Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:HINDUNILVR", "min_qty": 1, "step": 1},
+    "MARUTI": {"ticker": "MARUTI.NS", "name": "Maruti Suzuki India Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:MARUTI", "min_qty": 1, "step": 1},
+    "SUNPHARMA": {"ticker": "SUNPHARMA.NS", "name": "Sun Pharmaceutical Industries Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:SUNPHARMA", "min_qty": 1, "step": 1},
+    "TITAN": {"ticker": "TITAN.NS", "name": "Titan Company Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:TITAN", "min_qty": 1, "step": 1},
+    "BAJFINANCE": {"ticker": "BAJFINANCE.NS", "name": "Bajaj Finance Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:BAJFINANCE", "min_qty": 1, "step": 1},
+    "ASIANPAINT": {"ticker": "ASIANPAINT.NS", "name": "Asian Paints Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:ASIANPAINT", "min_qty": 1, "step": 1},
+    "ULTRACEMCO": {"ticker": "ULTRACEMCO.NS", "name": "UltraTech Cement Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:ULTRACEMCO", "min_qty": 1, "step": 1},
+    "NTPC": {"ticker": "NTPC.NS", "name": "NTPC Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:NTPC", "min_qty": 1, "step": 1},
+    "POWERGRID": {"ticker": "POWERGRID.NS", "name": "Power Grid Corporation of India Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:POWERGRID", "min_qty": 1, "step": 1},
+    "M&M": {"ticker": "M&M.NS", "name": "Mahindra & Mahindra Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:M_M", "min_qty": 1, "step": 1},
+    "TATASTEEL": {"ticker": "TATASTEEL.NS", "name": "Tata Steel Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:TATASTEEL", "min_qty": 1, "step": 1},
+    "HCLTECH": {"ticker": "HCLTECH.NS", "name": "HCL Technologies Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:HCLTECH", "min_qty": 1, "step": 1},
+    "TECHM": {"ticker": "TECHM.NS", "name": "Tech Mahindra Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:TECHM", "min_qty": 1, "step": 1},
+    "ADANIPORTS": {"ticker": "ADANIPORTS.NS", "name": "Adani Ports and SEZ Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:ADANIPORTS", "min_qty": 1, "step": 1},
+    "NESTLEIND": {"ticker": "NESTLEIND.NS", "name": "Nestle India Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:NESTLEIND", "min_qty": 1, "step": 1},
+    "ONGC": {"ticker": "ONGC.NS", "name": "Oil and Natural Gas Corporation Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:ONGC", "min_qty": 1, "step": 1},
+    "COALINDIA": {"ticker": "COALINDIA.NS", "name": "Coal India Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:COALINDIA", "min_qty": 1, "step": 1},
+    "JSWSTEEL": {"ticker": "JSWSTEEL.NS", "name": "JSW Steel Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:JSWSTEEL", "min_qty": 1, "step": 1},
+    "DRREDDY": {"ticker": "DRREDDY.NS", "name": "Dr. Reddy's Laboratories Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:DRREDDY", "min_qty": 1, "step": 1},
+    "CIPLA": {"ticker": "CIPLA.NS", "name": "Cipla Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:CIPLA", "min_qty": 1, "step": 1},
+    "EICHERMOT": {"ticker": "EICHERMOT.NS", "name": "Eicher Motors Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:EICHERMOT", "min_qty": 1, "step": 1},
+    "BAJAJ-AUTO": {"ticker": "BAJAJ-AUTO.NS", "name": "Bajaj Auto Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:BAJAJ_AUTO", "min_qty": 1, "step": 1},
+    "HEROMOTOCO": {"ticker": "HEROMOTOCO.NS", "name": "Hero MotoCorp Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:HEROMOTOCO", "min_qty": 1, "step": 1},
+    "GRASIM": {"ticker": "GRASIM.NS", "name": "Grasim Industries Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:GRASIM", "min_qty": 1, "step": 1},
+    "TRENT": {"ticker": "TRENT.NS", "name": "Trent Ltd", "category": "NSE", "currency": "INR", "currency_symbol": "₹", "tv": "NSE:TRENT", "min_qty": 1, "step": 1},
 
     # --- Crypto Assets (24/7 Continuous Trading) ---
     "BTC": {"ticker": "BTC-USD", "name": "Bitcoin", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:BTCUSDT", "min_qty": 0.001, "step": 0.001},
@@ -61,7 +119,24 @@ ASSETS = {
     "SOL": {"ticker": "SOL-USD", "name": "Solana", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:SOLUSDT", "min_qty": 0.1, "step": 0.1},
     "DOGE": {"ticker": "DOGE-USD", "name": "Dogecoin", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:DOGEUSDT", "min_qty": 10.0, "step": 1.0},
     "BNB": {"ticker": "BNB-USD", "name": "Binance Coin", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:BNBUSDT", "min_qty": 0.05, "step": 0.05},
-    "XRP": {"ticker": "XRP-USD", "name": "XRP Ripple", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:XRPUSDT", "min_qty": 1.0, "step": 1.0}
+    "XRP": {"ticker": "XRP-USD", "name": "XRP Ripple", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:XRPUSDT", "min_qty": 1.0, "step": 1.0},
+    "ADA": {"ticker": "ADA-USD", "name": "Cardano", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:ADAUSDT", "min_qty": 0.1, "step": 0.1},
+    "TRX": {"ticker": "TRX-USD", "name": "TRON", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:TRXUSDT", "min_qty": 0.1, "step": 0.1},
+    "AVAX": {"ticker": "AVAX-USD", "name": "Avalanche", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:AVAXUSDT", "min_qty": 0.01, "step": 0.01},
+    "LINK": {"ticker": "LINK-USD", "name": "Chainlink", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:LINKUSDT", "min_qty": 0.01, "step": 0.01},
+    "DOT": {"ticker": "DOT-USD", "name": "Polkadot", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:DOTUSDT", "min_qty": 0.01, "step": 0.01},
+    "LTC": {"ticker": "LTC-USD", "name": "Litecoin", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:LTCUSDT", "min_qty": 0.001, "step": 0.001},
+    "BCH": {"ticker": "BCH-USD", "name": "Bitcoin Cash", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:BCHUSDT", "min_qty": 0.001, "step": 0.001},
+    "XLM": {"ticker": "XLM-USD", "name": "Stellar", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:XLMUSDT", "min_qty": 1, "step": 1},
+    "HBAR": {"ticker": "HBAR-USD", "name": "Hedera", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:HBARUSDT", "min_qty": 1, "step": 1},
+    "NEAR": {"ticker": "NEAR-USD", "name": "NEAR Protocol", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:NEARUSDT", "min_qty": 0.1, "step": 0.1},
+    "ATOM": {"ticker": "ATOM-USD", "name": "Cosmos", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:ATOMUSDT", "min_qty": 0.01, "step": 0.01},
+    "ETC": {"ticker": "ETC-USD", "name": "Ethereum Classic", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:ETCUSDT", "min_qty": 0.01, "step": 0.01},
+    "FIL": {"ticker": "FIL-USD", "name": "Filecoin", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:FILUSDT", "min_qty": 0.01, "step": 0.01},
+    "ICP": {"ticker": "ICP-USD", "name": "Internet Computer", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:ICPUSDT", "min_qty": 0.01, "step": 0.01},
+    "OP": {"ticker": "OP-USD", "name": "Optimism", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:OPUSDT", "min_qty": 0.01, "step": 0.01},
+    "INJ": {"ticker": "INJ-USD", "name": "Injective", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:INJUSDT", "min_qty": 0.01, "step": 0.01},
+    "AAVE": {"ticker": "AAVE-USD", "name": "Aave", "category": "CRYPTO", "currency": "USD", "currency_symbol": "$", "tv": "BINANCE:AAVEUSDT", "min_qty": 0.001, "step": 0.001}
 }
 
 # Major Indices and Benchmarks
@@ -199,7 +274,7 @@ class AutoPilotConfig(BaseModel):
     market: Optional[str] = None  # "CRYPTO" or "NSE" (Trade ONLY one market at a time!)
     mode: Optional[str] = None  # "MULTI" (all coins in market) or "SELECTED"
     speed: Optional[str] = None  # "HYPER" (30-60s), "ACTIVE" (2-5m), "SWING" (15m+)
-    risk: Optional[str] = "HIGH"  # "HIGH" (Heavy allocation) or "NORMAL" (35% cash)
+    risk: Optional[str] = None  # "HIGH" (Heavy allocation) or "NORMAL"; None keeps the current one
 
 class AutoPilotToggle(BaseModel):
     enabled: bool
@@ -211,6 +286,10 @@ class TradingEngine:
         self.lock = threading.RLock()
         self.capital = INITIAL_CAPITAL
         self.cash = INITIAL_CAPITAL
+        # realized P&L of every closed trade at live prices, per currency (USD converts at the live rate)
+        self.realized_native = {"INR": 0.0, "USD": 0.0}
+        self.brokerage_paid = 0.0    # every order's brokerage, in INR (0: no simulated fees)
+        self.closed_trades = 0
         self.positions: Dict[str, dict] = {}
         self.orders: List[dict] = []
         self.trade_history: List[dict] = []
@@ -223,7 +302,7 @@ class TradingEngine:
         self.autopilot_target_symbol = "BTC"
         self.autopilot_mode = "MULTI"     # "MULTI" (trades ANY coin in active market) or "SELECTED"
         self.autopilot_speed = "HYPER"    # "HYPER" (fast execution)
-        self.autopilot_risk = "HIGH"      # "HIGH" (Heavy allocation) or "NORMAL"
+        self.autopilot_risk = "NORMAL"    # "HIGH" (Heavy allocation) or "NORMAL"
         self.position_open_time: Dict[str, float] = {}
         self.last_exit_time: Dict[str, float] = {}
         self.autopilot_status = {
@@ -247,7 +326,13 @@ class TradingEngine:
 
         c.execute("SELECT * FROM trades ORDER BY timestamp DESC LIMIT 50")
         for row in c.fetchall():
-            self.trade_history.append(dict(row))
+            t = dict(row)
+            t["currency"] = ASSETS.get(t["symbol"], {}).get("currency", "INR")   # crypto P&L is in USD
+            self.trade_history.append(t)
+
+        # Rebuild cash, positions and P&L from EVERY saved order, not only the last 50
+        c.execute("SELECT * FROM orders ORDER BY timestamp ASC")
+        self._replay([dict(r) for r in c.fetchall()])
 
         c.execute("SELECT key, value FROM config")
         for row in c.fetchall():
@@ -265,6 +350,47 @@ class TradingEngine:
             elif k == "autopilot_risk":
                 self.autopilot_risk = v
         conn.close()
+
+    def _replay(self, orders: List[dict]):
+        """Cash, positions and realized P&L from the full order log (oldest first), with the same
+        arithmetic as place_order, so a restart shows the true account. Every fill is valued at the
+        live quote stored with the order ("price"), not at a fill worsened by old simulated slippage."""
+        for o in orders:
+            if o.get("status") != "FILLED" or not o.get("filled_price"):
+                continue
+            sym = o["symbol"]
+            meta = ASSETS.get(sym, {})
+            curr = meta.get("currency", "INR")
+            rate = USD_INR_RATE if curr == "USD" else 1.0
+            live = o.get("price") if str(o.get("order_type", "")).upper() == "MARKET" else None
+            px, qty = float(live or o["filled_price"]), float(o["quantity"])
+            buy = str(o["side"]).upper() == "BUY"
+            self.cash += (-px * qty * rate if buy else px * qty * rate) - BROKERAGE_PER_ORDER
+            self.brokerage_paid += BROKERAGE_PER_ORDER
+            pos = self.positions.setdefault(sym, {
+                "symbol": sym, "name": meta.get("name", sym), "category": meta.get("category", "NSE"),
+                "currency": curr, "currency_symbol": meta.get("currency_symbol", "₹"), "quantity": 0.0,
+                "avg_price": 0.0, "stop_loss": None, "target": None, "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0, "ltp": px})
+            fill = qty if buy else -qty
+            old = pos["quantity"]
+            new = round(old + fill, 6)
+            if old == 0:
+                pos["avg_price"], pos["stop_loss"], pos["target"] = px, o.get("stop_loss"), o.get("target")
+            elif (old > 0) == (fill > 0):
+                pos["avg_price"] = (abs(old) * pos["avg_price"] + qty * px) / abs(new)
+            else:
+                closed = min(abs(old), qty)
+                delta = ((px - pos["avg_price"]) if old > 0 else (pos["avg_price"] - px)) * closed
+                pos["realized_pnl"] += delta
+                self.realized_native[curr] += delta
+                self.closed_trades += 1
+                if new == 0:
+                    pos["avg_price"], pos["stop_loss"], pos["target"] = 0.0, None, None
+                elif (old > 0) != (new > 0):
+                    pos["avg_price"] = px
+            pos["quantity"] = new
+            pos["ltp"] = px
 
     def get_market_status(self) -> dict:
         now = datetime.now()
@@ -343,6 +469,15 @@ class TradingEngine:
 
             is_exit_or_rms = (req.tag in ["SQUARE_OFF", "AUTO_SL", "AUTO_TARGET", "AUTOPILOT_TAKE_PROFIT", "AUTOPILOT_STOP_LOSS", "AUTOPILOT_TRAILING_PROFIT", "AUTOPILOT_PEAK_PROFIT", "AUTOPILOT_PROFIT_PULL", "AUTOPILOT_ROTATION", "AUTOPILOT_BREAK_EVEN", "AUTOPILOT_TARGET_HIT"]) or ("EXIT" in str(req.tag)) or ("PROFIT" in str(req.tag)) or ("STOP" in str(req.tag)) or ("BREAK_EVEN" in str(req.tag))
 
+            # 0. An exit only ever reduces a position. Two exits can fire together (the tick stop-loss and the
+            #    Auto-Pilot's own exit); the second must not flip the trade into the opposite side.
+            if is_exit_or_rms:
+                held = self.positions.get(clean_symbol, {}).get("quantity", 0)
+                reduces = (held > 0 and req.side.upper() == "SELL") or (held < 0 and req.side.upper() == "BUY")
+                if not reduces:
+                    raise HTTPException(status_code=409, detail=f"{clean_symbol}: nothing to close (already flat)")
+                req.quantity = min(req.quantity, abs(held))
+
             # 1. STRICT GUARD: Auto-Pilot orders MUST NOT execute on closed markets or outside active single market
             if req.tag and req.tag.startswith("AUTOPILOT_") and not is_exit_or_rms:
                 if self.autopilot_market and cat != self.autopilot_market:
@@ -369,22 +504,20 @@ class TradingEngine:
                     detail=f"Cannot place order: {cat} market for {clean_symbol} is currently CLOSED ({hours_str}). Crypto 24/7 is currently open."
                 )
 
-            ltp = self.market_data.get(clean_symbol, {}).get("ltp")
-
+            # Strictly live: fill at the latest real quote, never at a made-up or stale price
+            quote = self.market_data.get(clean_symbol, {})
+            ltp = quote.get("ltp")
+            age = time_module.time() - quote.get("quote_time", 0)
             if not ltp:
-                try:
-                    df = yf.download(ticker, period="1d", interval="1m", progress=False)
-                    if not df.empty:
-                        ltp = float(df['Close'].iloc[-1])
-                    else:
-                        ltp = 100.0
-                except Exception:
-                    ltp = 100.0
+                raise HTTPException(status_code=503, detail=f"No live price for {clean_symbol} yet: order not filled.")
+            if age > MAX_QUOTE_AGE.get(cat, 120.0):
+                raise HTTPException(status_code=503, detail=f"The {clean_symbol} quote is {age:.0f}s old, not live: "
+                                                            f"order not filled.")
+            if curr == "USD" and not USD_INR_RATE:
+                raise HTTPException(status_code=503, detail="No live USD/INR rate: order not filled.")
 
             order_id = f"ORD_{uuid.uuid4().hex[:8].upper()}"
-            slip = ltp * SLIPPAGE_PCT
-            fill_price = ltp + slip if req.side.upper() == "BUY" else ltp - slip
-            fill_price = round(fill_price, 4 if meta["category"] == "CRYPTO" and ltp < 10 else 2)
+            fill_price = ltp   # the live quote itself: no simulated slippage, no rounding
 
             # Check Margin Requirement in INR
             trade_value_native = fill_price * req.quantity
@@ -407,6 +540,7 @@ class TradingEngine:
                 self.cash -= (trade_value_inr + brokerage_inr)
             else:
                 self.cash += (trade_value_inr - brokerage_inr)
+            self.brokerage_paid += brokerage_inr
 
             order_record = {
                 "order_id": order_id,
@@ -453,22 +587,27 @@ class TradingEngine:
                 pos["quantity"] = new_qty
                 pos["stop_loss"] = req.stop_loss
                 pos["target"] = req.target
+                # A new trade starts with no peak: the position dict is reused after a close, and an
+                # inherited peak made the Break-Even Shield sell every new trade within a second.
+                pos["max_profit_pct"] = 0.0
                 self.position_open_time[clean_symbol] = time_module.time()
             elif (old_qty > 0 and fill_qty > 0) or (old_qty < 0 and fill_qty < 0):
                 total_cost = (abs(old_qty) * pos["avg_price"]) + (abs(fill_qty) * fill_price)
                 pos["quantity"] = new_qty
-                pos["avg_price"] = round(total_cost / abs(new_qty), 4 if meta["category"] == "CRYPTO" and fill_price < 10 else 2)
+                pos["avg_price"] = total_cost / abs(new_qty)   # exact average of live fills
                 if req.stop_loss: pos["stop_loss"] = req.stop_loss
                 if req.target: pos["target"] = req.target
             else:
                 # Closing or flipping
                 closed_qty = min(abs(old_qty), abs(fill_qty))
                 if old_qty > 0:
-                    realized_delta = round((fill_price - pos["avg_price"]) * closed_qty, 2)
+                    realized_delta = (fill_price - pos["avg_price"]) * closed_qty
                 else:
-                    realized_delta = round((pos["avg_price"] - fill_price) * closed_qty, 2)
+                    realized_delta = (pos["avg_price"] - fill_price) * closed_qty
 
                 pos["realized_pnl"] += realized_delta
+                self.realized_native[curr] += realized_delta   # exact; rounded only when shown
+                self.closed_trades += 1
                 pos["quantity"] = new_qty
                 if new_qty == 0:
                     pos["avg_price"] = 0.0
@@ -478,6 +617,7 @@ class TradingEngine:
                     self.last_exit_time[clean_symbol] = time_module.time()
                 elif (old_qty > 0 and new_qty < 0) or (old_qty < 0 and new_qty > 0):
                     pos["avg_price"] = fill_price
+                    pos["max_profit_pct"] = 0.0
                     self.position_open_time[clean_symbol] = time_module.time()
 
             # Update unrealized
@@ -549,6 +689,9 @@ class TradingEngine:
             self.square_off_all()
             self.capital = INITIAL_CAPITAL
             self.cash = INITIAL_CAPITAL
+            self.realized_native = {"INR": 0.0, "USD": 0.0}
+            self.brokerage_paid = 0.0
+            self.closed_trades = 0
             self.positions = {}
             self.orders = []
             self.trade_history = []
@@ -593,12 +736,18 @@ class TradingEngine:
                 if hit_sl or hit_target:
                     side = "SELL" if qty > 0 else "BUY"
                     tag = "AUTO_SL" if hit_sl else "AUTO_TARGET"
-                    # Exit immediately
+                    # Exit immediately (a "nothing to close" refusal just means another exit got there first)
                     threading.Thread(
-                        target=self.place_order,
+                        target=self._exit_quietly,
                         args=(OrderRequest(symbol=clean_symbol, side=side, quantity=abs(qty), tag=tag),),
                         daemon=True
                     ).start()
+
+    def _exit_quietly(self, req: OrderRequest):
+        try:
+            self.place_order(req)
+        except HTTPException:
+            pass
 
     def get_portfolio_summary(self) -> dict:
         with self.lock:
@@ -610,15 +759,14 @@ class TradingEngine:
                     rate = USD_INR_RATE if pos.get("currency") == "USD" else 1.0
                     total_unrealized_inr += (pos.get("unrealized_pnl", 0.0) * rate)
 
-            total_realized_inr = sum(
-                t["pnl"] * (USD_INR_RATE if t.get("currency") == "USD" else 1.0)
-                for t in self.trade_history
-            )
+            # Every closed trade (not just the last 50 in memory), at live prices; USD at the live rate
+            total_realized_inr = (self.realized_native["INR"] + self.realized_native["USD"] * USD_INR_RATE
+                                  - self.brokerage_paid)
             total_pnl_inr = round(total_realized_inr + total_unrealized_inr, 2)
             portfolio_val_inr = round(self.capital + total_pnl_inr, 2)
 
-            # Check Circuit Breaker (Expanded to 40% in HIGH RISK mode to allow big aggressive swings)
-            loss_pct = 0.40 if self.autopilot_risk == "HIGH" else MAX_DAILY_LOSS_PCT
+            # Check Circuit Breaker (5% in HIGH RISK mode, 2% otherwise)
+            loss_pct = HIGH_RISK_LOSS_PCT if self.autopilot_risk == "HIGH" else MAX_DAILY_LOSS_PCT
             max_daily_loss = self.capital * loss_pct
             if total_pnl_inr <= -max_daily_loss and not self.circuit_broken:
                 self.circuit_broken = True
@@ -637,7 +785,8 @@ class TradingEngine:
                 "total_pnl": total_pnl_inr,
                 "return_pct": round((total_pnl_inr / self.capital) * 100, 2),
                 "open_positions_count": open_positions,
-                "total_trades_count": len(self.trade_history),
+                "total_trades_count": self.closed_trades,
+                "brokerage_paid": round(self.brokerage_paid, 2),
                 "max_daily_loss_limit": max_daily_loss,
                 "max_daily_loss_pct": loss_pct * 100,
                 "autopilot_risk": self.autopilot_risk,
@@ -647,21 +796,18 @@ class TradingEngine:
 
 
 # Singleton engine
+# The live USD/INR rate is needed before the engine rebuilds the account; no rate, no start.
+USD_INR_RATE = fetch_usd_inr()
 engine = TradingEngine()
 
 
 # --- Background Concurrent Market Poller ---
 def fetch_crypto_data_binance() -> Dict[str, dict]:
-    symbols_map = {
-        "BTCUSDT": "BTC",
-        "ETHUSDT": "ETH",
-        "SOLUSDT": "SOL",
-        "DOGEUSDT": "DOGE",
-        "BNBUSDT": "BNB",
-        "XRPUSDT": "XRP"
-    }
+    # every crypto asset, as its Binance USDT pair (all checked to trade on Binance spot, 2026-10-30)
+    symbols_map = {k + "USDT": k for k, v in ASSETS.items() if v["category"] == "CRYPTO"}
     try:
-        url = 'https://api.binance.com/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22%2C%22ETHUSDT%22%2C%22SOLUSDT%22%2C%22DOGEUSDT%22%2C%22BNBUSDT%22%2C%22XRPUSDT%22%5D'
+        url = "https://api.binance.com/api/v3/ticker/24hr?symbols=" + urllib.parse.quote(
+            json.dumps(sorted(symbols_map), separators=(",", ":")))
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=3) as r:
             items = json.loads(r.read())
@@ -672,12 +818,17 @@ def fetch_crypto_data_binance() -> Dict[str, dict]:
             if not sym or sym not in ASSETS:
                 continue
             meta = ASSETS[sym]
-            ltp = float(item["lastPrice"])
-            prev_close = float(item.get("prevClosePrice", ltp))
-            day_high = float(item.get("highPrice", ltp * 1.01))
-            day_low = float(item.get("lowPrice", ltp * 0.99))
-            vol = float(item.get("volume", 100000))
-            change_pct = float(item.get("priceChangePercent", 0.0))
+            try:   # Binance's own numbers only; a ticker missing a field is skipped, never filled in
+                ltp = float(item["lastPrice"])
+                prev_close = float(item["prevClosePrice"])
+                day_high = float(item["highPrice"])
+                day_low = float(item["lowPrice"])
+                vol = float(item["volume"])
+                change_pct = float(item["priceChangePercent"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (ltp > 0 and prev_close > 0 and day_high > 0 and day_low > 0):   # NaN fails too
+                continue
 
             trend = "STRONG UPTREND" if change_pct > 0.5 else ("DOWNTREND" if change_pct < -0.5 else "SIDEWAYS")
             is_vcp = abs(day_high - day_low) < (ltp * 0.02)
@@ -698,11 +849,12 @@ def fetch_crypto_data_binance() -> Dict[str, dict]:
                 "currency": "USD",
                 "currency_symbol": "$",
                 "tv_symbol": meta["tv"],
-                "ltp": round(ltp, 4 if ltp < 10 else 2),
-                "prev_close": round(prev_close, 2),
+                "ltp": ltp,                      # exact live last-trade price, not rounded
+                "quote_time": time_module.time(),
+                "prev_close": prev_close,
                 "change_pct": round(change_pct, 2),
-                "day_high": round(day_high, 2),
-                "day_low": round(day_low, 2),
+                "day_high": day_high,
+                "day_low": day_low,
                 "volume": int(vol),
                 "trend": trend,
                 "is_vcp": is_vcp,
@@ -723,11 +875,18 @@ def fetch_ticker_data(item):
     try:
         t = yf.Ticker(ticker)
         info = t.fast_info
+        # Yahoo's own numbers only: if one is missing this update is skipped, never filled in
         ltp = float(info['lastPrice'])
-        prev_close = float(info.get('regularMarketPreviousClose', ltp))
-        day_high = float(info.get('dayHigh', ltp * 1.01))
-        day_low = float(info.get('dayLow', ltp * 0.99))
-        vol = int(info.get('lastVolume', 500000))
+        prev_close = float(info['regularMarketPreviousClose'])
+        if not np.isfinite(prev_close):   # Yahoo leaves this NaN for some NSE stocks; its previousClose is set
+            prev_close = float(info['previousClose'])
+        day_high = float(info['dayHigh'])
+        day_low = float(info['dayLow'])
+        vol = info['lastVolume']
+        if not all(isinstance(x, (int, float)) and np.isfinite(x) and x > 0
+                   for x in (ltp, prev_close, day_high, day_low)) or vol is None or not np.isfinite(vol):
+            return symbol, None    # Yahoo sent a NaN or a zero: skip this update, never fill one in
+        vol = int(vol)
         change_pct = round(((ltp - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
 
         # Trend & Technical Squeeze Detection
@@ -751,11 +910,12 @@ def fetch_ticker_data(item):
             "currency": meta["currency"],
             "currency_symbol": meta["currency_symbol"],
             "tv_symbol": meta["tv"],
-            "ltp": round(ltp, 4 if meta["category"] == "CRYPTO" and ltp < 10 else 2),
-            "prev_close": round(prev_close, 2),
+            "ltp": ltp,                          # exact live last price, not rounded
+            "quote_time": time_module.time(),
+            "prev_close": prev_close,
             "change_pct": change_pct,
-            "day_high": round(day_high, 2),
-            "day_low": round(day_low, 2),
+            "day_high": day_high,
+            "day_low": day_low,
             "volume": vol,
             "trend": trend,
             "is_vcp": is_vcp,
@@ -860,282 +1020,34 @@ def background_market_poller():
 
                 engine.update_ticks(sym, ltp)
 
-                # Auto-Pilot Execution Logic
-                if engine.auto_pilot and not engine.circuit_broken:
-                    market_status = engine.get_market_status()
-                    target_market = engine.autopilot_market or "CRYPTO"
-                    cat = data.get("category", "")
-
-                    # 1. STRICT SINGLE-MARKET ENFORCEMENT:
-                    # Trade ONLY in the single chosen market (e.g. CRYPTO or US or NSE) - NEVER mixed!
-                    if cat != target_market:
-                        if target_market != "CRYPTO":
-                            mkt_info = market_status.get(target_market.lower(), {})
-                            is_open = mkt_info.get("is_open", False)
-                            hours = mkt_info.get("hours", "")
-                            status_str = "OPEN" if is_open else "CLOSED"
-                            engine.autopilot_status = {
-                                "symbol": target_market,
-                                "state": "MARKET_FILTER",
-                                "message": f"Auto-Pilot set to single market: {target_market} ({status_str}: {hours}). Crypto trades skipped.",
-                                "last_action": "MARKET_FILTER",
-                                "last_action_time": now_str
-                            }
-                        continue
-
-                    # 2. STRICT GUARD: NEVER place trades on closed markets!
-                    is_market_open = True
-                    if cat == "NSE":
-                        is_market_open = market_status["nse"]["is_open"]
-                    elif cat == "CRYPTO":
-                        is_market_open = True
-
-                    if not is_market_open:
-                        engine.autopilot_status = {
-                            "symbol": target_market,
-                            "state": "MARKET_CLOSED",
-                            "message": f"{target_market} market is currently CLOSED. Auto-Pilot paused until market opens.",
-                            "last_action": "WAITING_OPEN",
-                            "last_action_time": now_str
-                        }
-                        continue  # Skip closed markets completely
-
-                    # 3. Market Selection Guard
-                    if engine.autopilot_mode == "SELECTED":
-                        if sym != engine.autopilot_target_symbol:
-                            continue  # Skip any asset that is not the user's selected target
-
-                    with engine.lock:
-                        open_crypto_positions = [
-                            s for s, p in engine.positions.items()
-                            if p.get("quantity", 0) != 0 and p.get("category") == "CRYPTO"
-                        ]
-                        open_crypto_count = len(open_crypto_positions)
-                        pos = engine.positions.get(sym)
-                        has_pos = (pos is not None and pos.get("quantity", 0) != 0)
-                        available_cash = engine.cash
-
-                    # 3. Position Management (Positive-Expectancy AlphaWave Trailing & Shield)
-                    if has_pos:
-                        qty = pos["quantity"]
-                        avg_price = pos["avg_price"]
-                        unrealized_pct = ((ltp - avg_price) / avg_price) * 100 * (1 if qty > 0 else -1) if avg_price else 0.0
-
-                        # Track peak unrealized profit for dynamic trailing stop
-                        if "max_profit_pct" not in pos:
-                            pos["max_profit_pct"] = 0.0
-                        pos["max_profit_pct"] = max(pos["max_profit_pct"], unrealized_pct)
-                        peak_profit = pos["max_profit_pct"]
-
-                        with engine.lock:
-                            ticks = [t["price"] for t in engine.tick_history.get(sym, [])]
-
-                        tick_diff = 0.0
-                        if len(ticks) >= 2:
-                            tick_diff = ticks[-1] - ticks[-2]
-
-                        should_exit = False
-                        exit_tag = "AUTOPILOT_TAKE_PROFIT"
-                        exit_reason = ""
-
-                        # Tier 1: Hard Stop-Loss (-0.50%): Cut failed setups strictly to preserve capital (1:2.5 R:R)
-                        if unrealized_pct <= -0.50:
-                            should_exit = True
-                            exit_tag = "AUTOPILOT_STOP_LOSS"
-                            exit_reason = f"Safety Stop-Loss triggered ({unrealized_pct:.2f}%)"
-
-                        # Tier 2: Break-Even Shield: If peak touched >= +0.35%, protect capital!
-                        # Exit if price pulls back to +0.08% (guarantees ₹4 brokerage is 100% paid + profit)
-                        elif peak_profit >= 0.35 and unrealized_pct <= 0.08:
-                            should_exit = True
-                            exit_tag = "AUTOPILOT_BREAK_EVEN"
-                            exit_reason = f"Break-Even Shield locked (+{unrealized_pct:.2f}% | peak was +{peak_profit:.2f}%)"
-
-                        # Tier 3: Trailing Profit Runner:
-                        # If peak reached >= +0.60%, trail behind peak by 0.25% to let big winners run!
-                        elif peak_profit >= 0.60 and unrealized_pct <= (peak_profit - 0.25):
-                            should_exit = True
-                            exit_tag = "AUTOPILOT_TRAILING_PROFIT"
-                            exit_reason = f"Trailing Profit Banked (+{unrealized_pct:.2f}% | peak was +{peak_profit:.2f}%)"
-
-                        # Tier 4: Major Profit Target (+1.25% or higher): Bank full target objective!
-                        elif unrealized_pct >= 1.25:
-                            should_exit = True
-                            exit_tag = "AUTOPILOT_TARGET_HIT"
-                            exit_reason = f"Full Profit Target Reached (+{unrealized_pct:.2f}%)"
-
-                        if should_exit:
-                            side = "SELL" if qty > 0 else "BUY"
-                            engine.autopilot_status = {
-                                "symbol": sym,
-                                "state": "TAKING_PROFIT" if unrealized_pct > 0 else "STOP_LOSS",
-                                "message": f"Auto-Pilot [{sym}]: {exit_reason}",
-                                "last_action": f"{exit_tag}_{side}",
-                                "last_action_time": now_str
-                            }
-                            try:
-                                engine.place_order(OrderRequest(
-                                    symbol=sym,
-                                    side=side,
-                                    quantity=abs(qty),
-                                    tag=exit_tag
-                                ))
-                            except Exception as e:
-                                print(f"[AutoPilot Exit Error] {e}")
-                            continue
-                        else:
-                            c_sym = data.get("currency_symbol", "$")
-                            tick_dir = "+UP" if tick_diff > 0 else ("-DOWN" if tick_diff < 0 else "=FLAT")
-                            engine.autopilot_status = {
-                                "symbol": sym,
-                                "state": "HOLDING_POSITION",
-                                "message": f"Holding {abs(qty)} {sym} @ {c_sym}{avg_price} ({unrealized_pct:+.2f}% | Peak: +{peak_profit:.2f}% | Tick: {tick_dir} {abs(tick_diff):.2f})",
-                                "last_action": "MONITORING",
-                                "last_action_time": now_str
-                            }
-                            continue
-
-                    # 4. Entry Signal Evaluation (Anti-Churn & Positive Expectancy Filter)
-                    if not has_pos:
-                        # Anti-Churn Cooldown: Require at least 25 seconds after last exit on this coin
-                        last_exit = engine.last_exit_time.get(sym, 0.0)
-                        if (time_module.time() - last_exit) < 25.0:
-                            continue
-
-                        # In MULTI mode, cap max concurrent open crypto positions to 4
-                        if engine.autopilot_mode == "MULTI" and open_crypto_count >= 4:
-                            continue
-
-                        # Minimum margin check
-                        min_margin = 8000.0 if engine.autopilot_mode == "MULTI" else 15000.0
-                        if available_cash < min_margin:
-                            engine.autopilot_status = {
-                                "symbol": sym,
-                                "state": "LOW_MARGIN",
-                                "message": f"Available cash (Rs.{available_cash:.2f}) too low for new positions.",
-                                "last_action": "WAITING_MARGIN",
-                                "last_action_time": now_str
-                            }
-                            continue
-
-                        should_trade = False
-                        trade_side = "BUY"
-                        trade_tag = f"AUTOPILOT_{cat}"
-                        reason = ""
-
-                        with engine.lock:
-                            ticks = [t["price"] for t in engine.tick_history.get(sym, [])]
-
-                        if cat == "CRYPTO":
-                            # High-Probability Quant Momentum & Volatility Breakout Filter:
-                            if len(ticks) >= 10:
-                                fast_ema = calc_ema(ticks, 5)
-                                slow_ema = calc_ema(ticks, 15)
-                                recent_high = max(ticks[-15:])
-                                recent_low = min(ticks[-15:])
-                                rng = max(0.0001, recent_high - recent_low)
-                                pos_in_range = (ltp - recent_low) / rng
-
-                                chg = data.get("change_pct", 0.0)
-                                day_high = data.get("day_high", ltp * 1.01)
-                                day_low = data.get("day_low", ltp * 0.99)
-
-                                # Bullish Momentum Breakout
-                                if fast_ema > slow_ema and pos_in_range >= 0.65 and chg > -2.0 and ltp > (day_low * 1.002):
-                                    should_trade = True
-                                    trade_side = "BUY"
-                                    trade_tag = "AUTOPILOT_QUANT_BREAKOUT"
-                                    reason = f"Bullish EMA Breakout (Range: {pos_in_range*100:.0f}%, 24h: {chg:+.1f}%)"
-                                # Bearish Momentum Breakdown
-                                elif fast_ema < slow_ema and pos_in_range <= 0.35 and chg < 2.0 and ltp < (day_high * 0.998):
-                                    should_trade = True
-                                    trade_side = "SELL"
-                                    trade_tag = "AUTOPILOT_QUANT_BREAKDOWN"
-                                    reason = f"Bearish EMA Breakdown (Range: {pos_in_range*100:.0f}%, 24h: {chg:+.1f}%)"
-
-                        elif data["is_breakout"] or data["is_vcp"]:
-                            should_trade = True
-                            trade_side = "BUY"
-                            trade_tag = "AUTOPILOT_BREAKOUT"
-                            reason = "VCP volatility breakout"
-                        elif data["trend"] == "STRONG UPTREND":
-                            should_trade = True
-                            trade_side = "BUY"
-                            trade_tag = f"AUTOPILOT_{cat}_TREND"
-                            reason = "Active session trend momentum"
-
-                        if should_trade:
-                            # Sizing calibrated for Rs.5,000+ daily goal:
-                            # Deploy ~$180 to $225 USD (~Rs.15,000 - Rs.19,000 INR) per position
-                            if data.get("currency") == "USD":
-                                if engine.autopilot_risk == "HIGH":
-                                    native_alloc = 200.0 if engine.autopilot_mode == "MULTI" else 250.0  # ~$200 - $250 USD per trade
-                                else:
-                                    native_alloc = 125.0 if engine.autopilot_mode == "MULTI" else 175.0  # ~$125 - $175 USD per trade
-                                max_alloc_inr = native_alloc * USD_INR_RATE
-                            else:
-                                if engine.autopilot_risk == "HIGH":
-                                    max_alloc_inr = 17000.0 if engine.autopilot_mode == "MULTI" else 25000.0
-                                else:
-                                    max_alloc_inr = 10000.0 if engine.autopilot_mode == "MULTI" else 15000.0
-                                native_alloc = max_alloc_inr
-
-                            # Margin headroom check: leave at least Rs.10,000 cash buffer
-                            if max_alloc_inr > (available_cash - 5000.0):
-                                max_alloc_inr = max(2000.0, available_cash - 5000.0)
-                                if data.get("currency") == "USD":
-                                    native_alloc = max_alloc_inr / USD_INR_RATE
-
-                            meta = ASSETS.get(sym, {})
-                            min_qty = meta.get("min_qty", 0.001 if cat == "CRYPTO" else 1.0)
-
-                            if cat == "CRYPTO":
-                                auto_qty = max(min_qty, round(native_alloc / ltp, 4 if ltp < 1000 else 4))
-                            else:
-                                auto_qty = max(min_qty, round(native_alloc / ltp, 0))
-
-                            sl_mult = 0.995 if trade_side == "BUY" else 1.005
-                            tgt_mult = 1.0125 if trade_side == "BUY" else 0.9875
-                            sl_price = round(ltp * sl_mult, 4 if ltp < 10 else 2)
-                            tgt_price = round(ltp * tgt_mult, 4 if ltp < 10 else 2)
-
-                            alloc_str = f"${native_alloc:.0f} USD (Rs.{max_alloc_inr:,.0f})" if data.get("currency") == "USD" else f"Rs.{max_alloc_inr:,.0f}"
-                            engine.autopilot_status = {
-                                "symbol": sym,
-                                "state": "EXECUTING",
-                                "message": f"🔥 [{sym}] {trade_side} {auto_qty} {sym} [{alloc_str}] ({reason})",
-                                "last_action": f"ENTER_{trade_side}",
-                                "last_action_time": now_str
-                            }
-
-                            try:
-                                req = OrderRequest(
-                                    symbol=sym,
-                                    side=trade_side,
-                                    quantity=auto_qty,
-                                    stop_loss=sl_price,
-                                    target=tgt_price,
-                                    tag=trade_tag
-                                )
-                                engine.place_order(req)
-                            except Exception as e:
-                                print(f"[AutoPilot Order Error] {e}")
+                # The Auto-Pilot no longer trades from here: its old tick-EMA entries lost money in every
+                # backtest. It now runs the trading skills (skills_autotrader_loop); the dashboard holds each
+                # order's stop and target (update_ticks) and the skills loop closes its trades at flat-by.
         except Exception as e:
             print(f"[Market Poller Error] {e}")
 
         time_module.sleep(1.0)  # Fast 1.0s concurrent tick cycle
 
 
-# Start poller threads
-poller_thread = threading.Thread(target=background_market_poller, daemon=True)
-poller_thread.start()
-
-equity_thread = threading.Thread(target=background_equity_poller, daemon=True)
-equity_thread.start()
-
-
 # --- FastAPI App ---
 app = FastAPI(title="Multi-Market Algorithmic Trading Terminal", version="2.0.0")
+
+_pollers_started = False
+
+
+@app.on_event("startup")
+def start_pollers():
+    """Start the market pollers (and the Auto-Pilot) once, when the web app starts. Starting them at
+    import ran TWO engines under `python server.py` (the script, then uvicorn's own import of it):
+    the hidden one kept trading the paper account with the Auto-Pilot the dashboard had turned off."""
+    global _pollers_started
+    if _pollers_started:
+        return
+    _pollers_started = True
+    threading.Thread(target=refresh_usd_inr, daemon=True).start()
+    threading.Thread(target=background_market_poller, daemon=True).start()
+    threading.Thread(target=background_equity_poller, daemon=True).start()
+    threading.Thread(target=skills_autotrader_loop, daemon=True).start()
 
 app.add_middleware(
     CORSMiddleware,
@@ -1152,7 +1064,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
 def get_dashboard():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    # no-store: a cached copy would hide dashboard updates (like the Skills panel) after a restart
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-store"})
 
 @app.get("/api/status")
 def get_status():
@@ -1287,6 +1200,408 @@ def reset_portfolio():
     engine.reset_portfolio()
     return {"message": f"Portfolio reset to Rs.{INITIAL_CAPITAL:,.0f} (~${INITIAL_CAPITAL/USD_INR_RATE:,.0f} USD) calibrated for $100-$200 trade sizing"}
 
+
+# --- Trading skills (.claude/skills): scan -> analyse -> size & risk -> your yes -> paper order ---
+# Each step runs the real skill script and returns its own JSON, so the panel shows exactly what the
+# skill computed. Files live in trader/ next to this server, the way the skills expect.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SKILLS_DIR = os.path.join(BASE_DIR, ".claude", "skills")
+TRADER_CFG = os.path.join(BASE_DIR, "trader", "config.json")
+skills_lock = threading.Lock()   # one skill pipeline at a time: they share trader/*.json
+
+
+def skills_config() -> dict:
+    """trader/config.json; written once with 1 % risk per trade of the paper capital per market."""
+    if os.path.exists(TRADER_CFG):
+        with open(TRADER_CFG, encoding="utf-8") as fh:
+            return json.load(fh)
+    usd_budget = round(INITIAL_CAPITAL / USD_INR_RATE, 2)
+    cfg = {
+        "paper": True, "allow_crypto": True, "require_stop": True, "min_reward_risk": 1.0,
+        "max_trades_per_day": 3, "max_orders_per_day": 10, "dashboard_url": "http://127.0.0.1:8001",
+        "markets": {
+            "nse": {"budget": INITIAL_CAPITAL, "max_loss_per_trade_usd": INITIAL_CAPITAL * 0.01,
+                    "max_daily_loss_usd": INITIAL_CAPITAL * 0.02, "max_order_usd": INITIAL_CAPITAL * 0.5,
+                    "min_order_usd": 500, "max_position_pct": 50, "cash_buffer_pct": 10, "broker": "dashboard",
+                    "no_entries_before": "09:30", "no_entries_after": "14:45", "flat_by": "15:10"},
+            "crypto": {"budget": usd_budget, "max_loss_per_trade_usd": round(usd_budget * 0.01, 2),
+                       "max_daily_loss_usd": round(usd_budget * 0.02, 2), "max_order_usd": round(usd_budget * 0.5, 2),
+                       "min_order_usd": 10, "max_position_pct": 50, "cash_buffer_pct": 10, "broker": "dashboard",
+                       "fee_pct": 0.1, "flat_by": "23:55"},
+        },
+    }
+    os.makedirs(os.path.dirname(TRADER_CFG), exist_ok=True)
+    with open(TRADER_CFG, "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, indent=2)
+    return cfg
+
+
+def run_skill(script: str, args: List[str], timeout: float = 240.0, cwd: str = None) -> dict:
+    """Run one skill script with --json in this folder (or cwd): {"ok", "code", "data", "text", "error"}."""
+    proc = subprocess.run([sys.executable, os.path.join(SKILLS_DIR, script)] + args, cwd=cwd or BASE_DIR,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                          env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    data = None
+    out = (proc.stdout or "").strip()
+    if out.startswith("{") or out.startswith("["):
+        try:
+            data = json.loads(out)
+        except ValueError:
+            data = None
+    err = (proc.stderr or "").strip().splitlines()
+    err = [line for line in err if "Warning" not in line and not line.startswith("  ")]
+    return {"ok": proc.returncode == 0, "code": proc.returncode, "data": data,
+            "text": out if data is None else None, "error": err[-1] if err else None}
+
+
+class SkillScan(BaseModel):
+    market: str            # "nse" or "crypto"
+    mode: str = "orb"      # "orb" (opening-range breakouts today) or "daily" (daily-close setups)
+
+
+class SkillAnalyze(BaseModel):
+    symbol: str            # RELIANCE.NS or BTC-USD
+    stop: str = "or-mid"   # or-mid, or-low, pct:X, atr:K
+    target: str = "2R"
+
+
+class SkillPlace(BaseModel):
+    reply: str             # the user's own words; only a plain "yes" approves
+
+
+@app.get("/api/skills/config")
+def skills_get_config():
+    return skills_config()
+
+
+@app.post("/api/skills/scan")
+def skills_scan(req: SkillScan):
+    if req.market not in ("nse", "crypto") or req.mode not in ("orb", "daily"):
+        raise HTTPException(status_code=400, detail="market is nse or crypto; mode is orb or daily")
+    skills_config()
+    with skills_lock:
+        args = [req.mode, "--market", req.market, "--json", "--quiet"]
+        if req.mode == "orb":   # orb reads the entry cutoff (no_entries_after) from the config
+            args += ["--config", TRADER_CFG]
+        return run_skill("trader-scanner/scan.py", args)
+
+
+@app.post("/api/skills/analyze")
+def skills_analyze(req: SkillAnalyze):
+    """Entry timer -> exit planner -> time machine, for one symbol, right now."""
+    skills_config()
+    sym = req.symbol.strip().upper()
+    with skills_lock:
+        entry = run_skill("trader-entry/entry.py", ["check", sym, "--write", "trader/entry.json", "--json",
+                                                   "--config", TRADER_CFG])
+        out = {"entry": entry, "plan": None, "timemachine": None}
+        if not entry["data"] or entry["data"].get("status") != "triggered":
+            return out
+        plan = run_skill("trader-exit/exit.py", ["plan", "--from", "trader/entry.json", "--stop", req.stop,
+                                                 "--target", req.target, "--config", TRADER_CFG,
+                                                 "--write", "trader/plan.json", "--json"])
+        out["plan"] = plan
+        if not plan["ok"] or not plan["data"]:
+            return out
+        tm = run_skill("trader-timemachine/timemachine.py", ["run", "--plan", "trader/plan.json", "--until",
+                                                            plan["data"]["flat_by"], "--write",
+                                                            "trader/timemachine.json", "--json"])
+        if tm["data"]:   # the fan chart's and sample paths' thousands of points are not needed in the panel
+            for k in ("bands", "sample_paths", "band_times"):
+                tm["data"]["mc"].pop(k, None)
+        out["timemachine"] = tm
+        return out
+
+
+@app.post("/api/skills/size")
+def skills_size():
+    """Budget sizer -> risk check -> the ticket, for the plan from the last analysis."""
+    skills_config()
+    with skills_lock:
+        # The live quote for the plan's symbol, so sizing and the risk check measure from the price a
+        # market order would fill at now (they use the higher of it and the plan's entry).
+        try:
+            with open(os.path.join(BASE_DIR, "trader", "plan.json"), encoding="utf-8") as fh:
+                psym = json.load(fh)["symbol"]
+            q = engine.market_data.get(normalize_symbol(psym), {})
+            if q.get("ltp") and q.get("quote_time"):
+                t = datetime.utcfromtimestamp(q["quote_time"]).strftime("%Y-%m-%dT%H:%M:%SZ")
+                with open(os.path.join(BASE_DIR, "trader", "prices.json"), "w", encoding="utf-8") as fh:
+                    json.dump({"as_of": t, "source": "dashboard live quote", "prices": {psym: q["ltp"]},
+                               "detail": {psym: {"time": t}}}, fh, indent=2)
+        except (OSError, ValueError, KeyError):
+            pass
+        size = run_skill("trader-budget/size.py", ["--plan", "trader/plan.json", "--config", TRADER_CFG,
+                                                  "--write", "trader/orders.json", "--json"])
+        out = {"size": size, "risk": None, "ticket": None}
+        if not size["data"] or not size["data"].get("orders"):
+            return out
+        out["risk"] = run_skill("trader-risk/check.py", ["--orders", "trader/orders.json", "--config", TRADER_CFG,
+                                                        "--json"])
+        out["ticket"] = run_skill("trader-broker/ticket.py", ["show", "--index", "1", "--json",
+                                                             "--orders", "trader/orders.json", "--config", TRADER_CFG])
+        return out
+
+
+@app.post("/api/skills/place")
+def skills_place(req: SkillPlace):
+    """Record the user's yes for order 1 (the skill refuses anything but a plain yes), then send it."""
+    with skills_lock:
+        common = ["--index", "1", "--orders", "trader/orders.json", "--config", TRADER_CFG]
+        approve = run_skill("trader-broker/ticket.py", ["approve", "--reply", req.reply] + common)
+        if not approve["ok"]:
+            return {"placed": False, "step": "approve", "message": approve["error"] or approve["text"]}
+        send = run_skill("trader-broker/ticket.py", ["send"] + common)
+        return {"placed": send["ok"], "step": "send", "message": send["error"] or send["text"]}
+
+
+# --- Skills auto-trader: the same pipeline, on a timer, for the paper account only ---
+# Every cycle it scans each enabled market for opening-range breakouts and runs every FRESH one
+# through entry -> exit plan -> time machine -> size -> risk. It places a paper order only when
+# all of these hold, and logs why every symbol was traded or skipped:
+#   1. the breakout bar closed at most max_breakout_age_min ago (no chasing late entries)
+#   2. the exit plan is accepted (charges under 50 % of the risk)
+#   3. after charges, the replays' average R > 0 AND the rule's real history on this symbol
+#      (at least min_history_trades trades) averages R > 0
+#   4. trader-risk passes (per-trade and daily loss, trades a day, the entry window)
+# One position per symbol, each symbol at most once a day, and skill trades are closed at flat-by.
+from collections import deque
+from datetime import timedelta, timezone
+
+AUTO_DIR = os.path.join(BASE_DIR, "trader", "auto")          # its own plan / orders files
+SHARED_STATE = os.path.join(BASE_DIR, "trader", "state", "broker.json")   # shared daily counters
+AUTO_DEFAULTS = {"every_sec": 300, "stop": "or-low", "target": "2R", "max_breakout_age_min": 10,
+                 "min_history_trades": 20}
+
+
+class AutoTrader:
+    """The Auto-Pilot's engine: on/off, market and SELECTED symbol come from the Auto-Pilot settings."""
+    def __init__(self):
+        self.log = deque(maxlen=200)
+        self.traded = {}          # (market, day) -> symbols placed today
+        self.last_cycle = {}      # market -> unix time of its last scan
+        self.busy = False
+
+    @property
+    def enabled(self):
+        return engine.auto_pilot
+
+    @property
+    def markets(self):
+        return {"nse" if engine.autopilot_market == "NSE" else "crypto"}
+
+    def note(self, market, symbol, action, detail):
+        now = datetime.now()
+        self.log.appendleft({"at": now.strftime("%Y-%m-%d %H:%M:%S"), "market": market,
+                             "symbol": symbol, "action": action, "detail": detail})
+        if action != "skip":   # the Auto-Pilot card shows the latest decision that did something
+            engine.autopilot_status = {"symbol": normalize_symbol(symbol) if symbol else (market or "").upper(),
+                                       "state": {"placed": "EXECUTING", "closed": "TAKING_PROFIT", "error": "ERROR",
+                                                 "blocked": "BLOCKED"}.get(action, "SCANNING"),
+                                       "message": "Skills: %s%s" % (symbol + " " if symbol else "", detail),
+                                       "last_action": action.upper(), "last_action_time": now.strftime("%H:%M:%S")}
+
+
+autotrader = AutoTrader()
+
+
+def auto_cfg() -> dict:
+    cfg = dict(AUTO_DEFAULTS)
+    cfg.update((skills_config().get("auto") or {}))
+    return cfg
+
+
+def _local_now(market):
+    """The market's own clock as a naive datetime: IST for NSE, UTC for crypto."""
+    return datetime.utcnow() + (timedelta(hours=5, minutes=30) if market == "nse" else timedelta(0))
+
+
+def _minutes(hhmm: str) -> int:
+    h, m = hhmm.split(":")[:2]
+    return int(h) * 60 + int(m)
+
+
+def nse_window_open(now_ist) -> bool:
+    """09:35-14:45 IST on a weekday while the NSE session is open (the risk check also blocks NSE holidays)."""
+    t = now_ist.hour * 60 + now_ist.minute
+    return now_ist.weekday() < 5 and 9 * 60 + 35 <= t <= 14 * 60 + 45 and engine.get_market_status()["nse"]["is_open"]
+
+
+def auto_write_live_price(symbol: str):
+    q = engine.market_data.get(normalize_symbol(symbol), {})
+    if q.get("ltp") and q.get("quote_time"):
+        t = datetime.utcfromtimestamp(q["quote_time"]).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(os.path.join(AUTO_DIR, "trader", "prices.json"), "w", encoding="utf-8") as fh:
+            json.dump({"as_of": t, "source": "dashboard live quote", "prices": {symbol: q["ltp"]},
+                       "detail": {symbol: {"time": t}}}, fh)
+
+
+def auto_try_symbol(market: str, sym: str, cfg: dict) -> None:
+    """One fresh breakout through the whole pipeline. Logs the outcome either way."""
+    A = dict(cwd=AUTO_DIR)
+    entry = run_skill("trader-entry/entry.py", ["check", sym, "--write", "trader/entry.json", "--json",
+                                               "--config", TRADER_CFG], **A)
+    e = entry["data"]
+    if not e or e.get("status") != "triggered":
+        autotrader.note(market, sym, "skip", "entry timer: %s" % ((e or {}).get("reason") or entry["error"]))
+        return
+    if (e.get("minutes_since") or 0) > cfg["max_breakout_age_min"]:
+        autotrader.note(market, sym, "skip", "breakout %d min old (max %d)" % (e["minutes_since"], cfg["max_breakout_age_min"]))
+        return
+    plan = run_skill("trader-exit/exit.py", ["plan", "--from", "trader/entry.json", "--stop", cfg["stop"],
+                                             "--target", cfg["target"], "--config", TRADER_CFG,
+                                             "--write", "trader/plan.json", "--json"], **A)
+    if not plan["ok"] or not plan["data"]:
+        autotrader.note(market, sym, "skip", "exit plan refused: %s" % (plan["error"] or plan["text"]))
+        return
+    tm = run_skill("trader-timemachine/timemachine.py", ["run", "--plan", "trader/plan.json", "--until",
+                                                        plan["data"]["flat_by"], "--json"], **A)
+    if not tm["data"]:
+        autotrader.note(market, sym, "skip", "time machine: %s" % (tm["error"] or tm["text"]))
+        return
+    mc, hist = tm["data"]["mc"], tm["data"].get("history") or {}
+    odds = "replays %+.2fR, history %s trades %s after charges" % (
+        mc["avg_R_net"], hist.get("triggered", 0),
+        ("%+.2fR" % hist["avg_R_net"]) if hist.get("avg_R_net") is not None else "n/a")
+    if mc["avg_R_net"] <= 0 or (hist.get("triggered") or 0) < cfg["min_history_trades"] or (hist.get("avg_R_net") or 0) <= 0:
+        autotrader.note(market, sym, "skip", "no edge after charges (%s)" % odds)
+        return
+    q = engine.market_data.get(normalize_symbol(sym), {})
+    if not q.get("ltp") or time_module.time() - q.get("quote_time", 0) > MAX_QUOTE_AGE.get(q.get("category"), 120.0):
+        autotrader.note(market, sym, "skip", "edge OK (%s) but no live quote right now: not placed" % odds)
+        return
+    auto_write_live_price(sym)
+    size = run_skill("trader-budget/size.py", ["--plan", "trader/plan.json", "--config", TRADER_CFG,
+                                              "--write", "trader/orders.json", "--json"], **A)
+    sd = size["data"] or {}
+    if not sd.get("orders"):
+        autotrader.note(market, sym, "skip", "sizing: %s" % ((sd.get("sizing") or {}).get("refusal") or size["error"]))
+        return
+    common = ["--orders", "trader/orders.json", "--config", TRADER_CFG, "--state", SHARED_STATE]
+    with skills_lock:   # the shared daily counters: one risk check / placement at a time
+        risk = run_skill("trader-risk/check.py", common + ["--json"], **A)
+        rv = ((risk["data"] or {}).get("results") or [{}])[0]
+        if rv.get("verdict") != "PASS":
+            autotrader.note(market, sym, "blocked", "risk: %s" % "; ".join(rv.get("reasons") or [risk["error"] or "no verdict"]))
+            return
+        tk = ["--index", "1"] + common
+        approve = run_skill("trader-broker/ticket.py", ["approve", "--reply", "yes (auto-trader, paper)"] + tk, **A)
+        if not approve["ok"]:
+            autotrader.note(market, sym, "error", "approve: %s" % (approve["error"] or approve["text"]))
+            return
+        send = run_skill("trader-broker/ticket.py", ["send"] + tk, **A)
+    s = sd["sizing"]
+    if send["ok"]:
+        autotrader.traded.setdefault((market, _local_now(market).date().isoformat()), set()).add(sym)
+        autotrader.note(market, sym, "placed", "bought %s at the live price, stop %s, target %s, max loss %s incl. "
+                        "charges (%s)" % (s["qty"], s["stop"], s["target"], s["max_loss"], odds))
+    else:
+        autotrader.note(market, sym, "error", "send: %s" % (send["error"] or send["text"]))
+
+
+def auto_cycle(market: str) -> None:
+    cfg = auto_cfg()
+    args = ["orb", "--market", market, "--json", "--quiet", "--no-write", "--config", TRADER_CFG]
+    scan = run_skill("trader-scanner/scan.py", args, cwd=AUTO_DIR)
+    d = scan["data"]
+    if not d:
+        autotrader.note(market, "", "scan", scan["error"] or scan["text"] or "no scan result")
+        return
+    now_min = _minutes(d["as_of"].split()[1])
+    fresh = [h for h in d["hits"] if 0 <= now_min - _minutes(h["at"]) <= cfg["max_breakout_age_min"]]
+    autotrader.note(market, "", "scan", "%s: %d breakouts today, %d fresh (<= %d min)"
+                    % (d["as_of"], len(d["hits"]), len(fresh), cfg["max_breakout_age_min"]))
+    day = _local_now(market).date().isoformat()
+    done = autotrader.traded.get((market, day), set())
+    if engine.autopilot_mode == "SELECTED":
+        fresh = [h for h in fresh if normalize_symbol(h["symbol"]) == engine.autopilot_target_symbol]
+    for h in fresh:
+        sym = h["symbol"]
+        pos = engine.positions.get(normalize_symbol(sym), {})
+        if sym in done or pos.get("quantity", 0):
+            autotrader.note(market, sym, "skip", "already traded today or already open")
+            continue
+        try:
+            auto_try_symbol(market, sym, cfg)
+        except Exception as ex:   # one bad symbol never stops the cycle
+            autotrader.note(market, sym, "error", str(ex))
+
+
+def auto_flat_by_exits() -> None:
+    """Close skill-opened positions at the market's flat-by (NSE 15:10 IST, crypto 23:55 UTC)."""
+    mk = skills_config().get("markets") or {}
+    for sym, pos in list(engine.positions.items()):
+        qty = pos.get("quantity", 0)
+        if not qty:
+            continue
+        opening = next((o for o in engine.orders if o.get("symbol") == sym
+                        and o.get("side") == ("BUY" if qty > 0 else "SELL")), None)
+        if not opening or not str(opening.get("tag", "")).startswith("SKILL_"):
+            continue
+        market = "nse" if pos.get("category") == "NSE" else "crypto"
+        flat = (mk.get(market) or {}).get("flat_by") or ("15:10" if market == "nse" else "23:55")
+        now = _local_now(market)
+        t = now.hour * 60 + now.minute
+        if market == "nse":   # 15:10-15:30 IST; after the close the dashboard's own square-off takes over
+            due = _minutes(flat) <= t <= 15 * 60 + 30
+        else:                 # 23:55 UTC, or any crypto trade still open from an earlier UTC day
+            try:
+                opened = datetime.fromisoformat(opening["timestamp"]).astimezone(timezone.utc).date()
+            except (KeyError, ValueError):
+                opened = now.date()
+            due = t >= _minutes(flat) or opened < now.date()
+        if due:
+            try:
+                engine.place_order(OrderRequest(symbol=sym, side="SELL" if qty > 0 else "BUY", quantity=abs(qty),
+                                                tag="SKILL_EXIT_FLAT_BY"))
+                autotrader.note(market, sym, "closed", "flat by %s: closed %s at the live price" % (flat, abs(qty)))
+            except HTTPException as ex:
+                autotrader.note(market, sym, "error", "flat-by close failed: %s" % ex.detail)
+
+
+def skills_autotrader_loop():
+    os.makedirs(os.path.join(AUTO_DIR, "trader"), exist_ok=True)
+    was_on = False
+    while True:
+        try:
+            auto_flat_by_exits()
+            if autotrader.enabled and not was_on:   # just switched on: scan right away
+                autotrader.last_cycle = {}
+                autotrader.note("", "", "on", "Auto-Pilot ON: trading skills on %s (paper account)"
+                                % ", ".join(m.upper() for m in sorted(autotrader.markets)))
+            elif was_on and not autotrader.enabled:
+                autotrader.note("", "", "off", "Auto-Pilot OFF: no new trades; open skill trades still close at flat-by")
+            was_on = autotrader.enabled
+            if autotrader.enabled:
+                cfg = auto_cfg()
+                for market in sorted(autotrader.markets):
+                    if time_module.time() - autotrader.last_cycle.get(market, 0) < cfg["every_sec"]:
+                        continue
+                    if market == "nse" and not nse_window_open(_local_now("nse")):
+                        engine.autopilot_status = {"symbol": "NSE", "state": "MARKET_CLOSED", "last_action": "WAITING_OPEN",
+                                                   "message": "Skills trade NSE 09:35-14:45 IST on weekdays; waiting.",
+                                                   "last_action_time": datetime.now().strftime("%H:%M:%S")}
+                        continue
+                    autotrader.last_cycle[market] = time_module.time()
+                    autotrader.busy = True
+                    try:
+                        auto_cycle(market)
+                    finally:
+                        autotrader.busy = False
+        except Exception as ex:
+            autotrader.note("", "", "error", "auto-trader: %s" % ex)
+        time_module.sleep(20.0)
+
+
+@app.get("/api/skills/auto")
+def skills_auto_status():
+    cfg = auto_cfg()
+    return {"enabled": autotrader.enabled, "markets": sorted(autotrader.markets), "busy": autotrader.busy,
+            "rules": cfg, "log": list(autotrader.log)[:60],
+            "next_in": {m: max(0, int(cfg["every_sec"] - (time_module.time() - autotrader.last_cycle.get(m, 0))))
+                        for m in autotrader.markets}}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -1325,4 +1640,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=8001, reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=8001, reload=False)  # the app object: no second import
